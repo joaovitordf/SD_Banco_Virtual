@@ -18,7 +18,7 @@ public class Controller implements Receiver, RequestHandler {
     private MessageDispatcher despachante;
     private HashMap<Integer, Conta> contas = new HashMap<>();
     final List<String> state=new LinkedList<String>();
-    private int idConta = 1;  // Contador para gerar IDs únicos de conta
+    private int idConta = 1;
     private Map<String, Conta> clientes = new HashMap<>();  // Mapa para armazenar clientes
     private String caminhoJson = "C:/Users/xjoao/IdeaProjects/SD_Banco_Virtual/src/main/java/clientes.json";
 
@@ -62,14 +62,71 @@ public class Controller implements Receiver, RequestHandler {
                 System.out.println("[SERVIDOR] Conta recebida: " + conta + ", Nome: " + conta.getNome());
 
                 // Armazenando a conta no mapa de clientes
-                clientes.put(conta.getNome(), conta);  // Associando a conta pelo número da conta ou outro identificador
+                clientes.put(conta.getNome(), conta);  // Associando a conta pelo numero da conta ou outro identificador
 
                 salvarCadastroEmArquivo(conta.getNome(), conta.getSenha());
             } else if (object instanceof String) {
-                String line = msg.getSrc() + ": " + (String) object;
-                System.out.println(line);
-                synchronized(state) {
-                    state.add(line);
+                String mensagem = (String) object;
+
+                if (mensagem.startsWith("CONSULTAR:")) {
+                    // Extrai o nome do cliente a ser consultado
+                    String nomeCliente = mensagem.substring(10).trim();
+
+                    // Consulta os dados do cliente
+                    String respostaConsulta = consultarCliente(nomeCliente);
+
+                    // Envia a resposta de volta para o cliente
+                    Message resposta = new ObjectMessage(msg.getSrc(), respostaConsulta);
+                    channel.send(resposta);
+                }
+
+                if (((String) object).startsWith("SOMAR_SALDOS")) {
+                    System.out.println("[SERVIDOR] Solicitação de soma dos saldos recebida.");
+                    String resultado = somarSaldosClientes();
+                    try {
+                        // Enviar o resultado de volta ao cliente
+                        Message resposta = new ObjectMessage(msg.getSrc(), resultado);
+                        channel.send(resposta);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+
+                if (((String) object).startsWith("REMOVER:")) {
+                    String nomeCliente = ((String) object).substring(8).trim(); // Extrai o nome após 'REMOVER:'
+                    System.out.println("[SERVIDOR] Solicitação de remoção para o cliente: " + nomeCliente);
+
+                    String resultado = removerClienteDoArquivo(nomeCliente); // Remove o cliente do JSON
+
+                    try {
+                        // Enviar a resposta ao cliente
+                        Message resposta = new ObjectMessage(msg.getSrc(), resultado);
+                        channel.send(resposta);
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+
+                if (((String) object).startsWith("ALTERAR:")) {
+                    String[] partes = ((String) object).split(":");
+                    if (partes.length == 3) {
+                        String nomeCliente = partes[1].trim();
+                        String novaSenha = partes[2].trim();
+
+                        System.out.println("[SERVIDOR] Solicitação de alteração para o cliente: " + nomeCliente);
+
+                        String resultado = alterarSenhaCliente(nomeCliente, novaSenha); // Altera a senha no JSON
+
+                        try {
+                            // Enviar a resposta ao cliente
+                            Message resposta = new ObjectMessage(msg.getSrc(), resultado);
+                            channel.send(resposta);
+                        } catch (Exception e) {
+                            e.printStackTrace();
+                        }
+                    } else {
+                        System.out.println("[SERVIDOR] Mensagem de alteração mal formatada.");
+                    }
                 }
             }
         } catch (Exception e) {
@@ -119,7 +176,7 @@ public class Controller implements Receiver, RequestHandler {
 
             switch (pedido.tipoPedido) {
                 case Pedido.TIPO_SALDO:
-                    // Recupera a conta do mapa 'contas' usando o número da conta
+                    // Recupera a conta do mapa 'contas' usando o numero da conta
                     Conta conta = contas.get(pedido.numConta);
                     if (conta == null) {
                         return "Conta não encontrada.";
@@ -139,7 +196,7 @@ public class Controller implements Receiver, RequestHandler {
 
     private void salvarCadastroEmArquivo(String nome, String senha) {
         try {
-            // Verifica se o nome já existe no json
+            // Verifica se o nome ja existe no json
             if (clienteExistente(nome)) {
                 System.out.println("[SERVIDOR] Cliente com o nome " + nome + " já cadastrado.");
                 return; // Não permite cadastrar um novo cliente com o mesmo nome
@@ -151,7 +208,7 @@ public class Controller implements Receiver, RequestHandler {
             JSONArray clientesArray = new JSONArray();
             int maiorId = 0;
 
-            if (arquivo.exists() && arquivo.length() > 0) {  // Verifica se o arquivo existe e não está vazio
+            if (arquivo.exists() && arquivo.length() > 0) {  // Verifica se o arquivo existe e não esta vazio
                 // Leitura do conteudo atual do arquivo
                 try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
                     StringBuilder sb = new StringBuilder();
@@ -160,10 +217,10 @@ public class Controller implements Receiver, RequestHandler {
                         sb.append(linha);
                     }
 
-                    // Tenta converter o conteúdo do arquivo em um array JSON
+                    // Tenta converter o conteudo do arquivo em um array JSON
                     String content = sb.toString().trim();
                     if (content.startsWith("[") && content.endsWith("]")) {
-                        // Se o conteúdo for um array válido, converte
+                        // Se o conteudo for um array valido, converte
                         clientesArray = new JSONArray(content);
                         // Determina o maior id no JSON
                         for (int i = 0; i < clientesArray.length(); i++) {
@@ -173,7 +230,7 @@ public class Controller implements Receiver, RequestHandler {
                             }
                         }
                     } else {
-                        // Se não for um array válido, cria um novo array vazio
+                        // Se não for um array valido, cria um novo array vazio
                         clientesArray = new JSONArray();
                     }
                 }
@@ -204,7 +261,7 @@ public class Controller implements Receiver, RequestHandler {
         }
     }
 
-    // Verifica se o cliente já existe pelo nome
+    // Verifica se o cliente ja existe pelo nome
     private boolean clienteExistente(String nome) {
         File arquivo = new File(caminhoJson);
 
@@ -216,14 +273,14 @@ public class Controller implements Receiver, RequestHandler {
                     sb.append(linha);
                 }
 
-                // Tenta converter o conteúdo do arquivo em um array JSON
+                // Tenta converter o conteudo do arquivo em um array JSON
                 String content = sb.toString().trim();
                 if (content.startsWith("[") && content.endsWith("]")) {
                     JSONArray clientesArray = new JSONArray(content);
                     for (int i = 0; i < clientesArray.length(); i++) {
                         JSONObject cliente = clientesArray.getJSONObject(i);
                         if (cliente.getString("nome").equals(nome)) {
-                            return true; // Cliente já existe
+                            return true; // Cliente ja existe
                         }
                     }
                 }
@@ -234,8 +291,169 @@ public class Controller implements Receiver, RequestHandler {
         return false; // Cliente não encontrado
     }
 
-    public Conta consultarConta(String cpf) {
-        return clientes.get(cpf);
+    private String consultarCliente(String nome) {
+        File arquivo = new File(caminhoJson);
+
+        if (arquivo.exists() && arquivo.length() > 0) {
+            try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
+                StringBuilder sb = new StringBuilder();
+                String linha;
+                while ((linha = reader.readLine()) != null) {
+                    sb.append(linha);
+                }
+
+                // Converte o conteudo do arquivo em um array JSON
+                String content = sb.toString().trim();
+                if (content.startsWith("[") && content.endsWith("]")) {
+                    JSONArray clientesArray = new JSONArray(content);
+
+                    for (int i = 0; i < clientesArray.length(); i++) {
+                        JSONObject cliente = clientesArray.getJSONObject(i);
+                        if (cliente.getString("nome").equalsIgnoreCase(nome)) {
+                            return cliente.toString(4); // Retorna os dados formatados
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+        return "[SERVIDOR] Cliente não encontrado.";
+    }
+
+    private String somarSaldosClientes() {
+        File arquivo = new File(caminhoJson);
+
+        if (!arquivo.exists() || arquivo.length() == 0) {
+            return "[SERVIDOR] Arquivo JSON vazio ou não encontrado.";
+        }
+
+        try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
+            StringBuilder sb = new StringBuilder();
+            String linha;
+            while ((linha = reader.readLine()) != null) {
+                sb.append(linha);
+            }
+
+            // Converte o conteudo do arquivo em um JSONArray
+            String content = sb.toString().trim();
+            if (content.startsWith("[") && content.endsWith("]")) {
+                JSONArray clientesArray = new JSONArray(content);
+
+                double somaSaldos = 0;
+                for (int i = 0; i < clientesArray.length(); i++) {
+                    JSONObject cliente = clientesArray.getJSONObject(i);
+                    if (cliente.has("saldo")) {
+                        somaSaldos += cliente.getDouble("saldo");
+                    }
+                }
+
+                return "[SERVIDOR] A soma dos saldos é: " + somaSaldos;
+            } else {
+                return "[SERVIDOR] Formato de arquivo JSON inválido.";
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            return "[SERVIDOR] Erro ao processar a soma dos saldos.";
+        }
+    }
+
+    private String removerClienteDoArquivo(String nome) {
+        File arquivo = new File(caminhoJson);
+
+        if (!arquivo.exists() || arquivo.length() == 0) {
+            return "[SERVIDOR] Arquivo JSON vazio ou não encontrado.";
+        }
+
+        try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
+            StringBuilder sb = new StringBuilder();
+            String linha;
+            while ((linha = reader.readLine()) != null) {
+                sb.append(linha);
+            }
+
+            // Converte o conteudo do arquivo em um JSONArray
+            String content = sb.toString().trim();
+            if (content.startsWith("[") && content.endsWith("]")) {
+                JSONArray clientesArray = new JSONArray(content);
+
+                // Percorre o array e remove o cliente com o nome correspondente
+                boolean clienteRemovido = false;
+                for (int i = 0; i < clientesArray.length(); i++) {
+                    JSONObject cliente = clientesArray.getJSONObject(i);
+                    if (cliente.getString("nome").equalsIgnoreCase(nome)) {
+                        clientesArray.remove(i); // Remove o cliente
+                        clienteRemovido = true;
+                        break;
+                    }
+                }
+
+                if (clienteRemovido) {
+                    // Salva o array atualizado de volta no arquivo
+                    try (FileWriter file = new FileWriter(arquivo)) {
+                        file.write(clientesArray.toString(4)); // '4' para identação
+                        file.flush();
+                    }
+                    return "[SERVIDOR] Cliente " + nome + " removido com sucesso.";
+                } else {
+                    return "[SERVIDOR] Cliente " + nome + " não encontrado.";
+                }
+            } else {
+                return "[SERVIDOR] Formato de arquivo JSON inválido.";
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            return "[SERVIDOR] Erro ao processar a remoção do cliente.";
+        }
+    }
+
+    private String alterarSenhaCliente(String nome, String novaSenha) {
+        File arquivo = new File(caminhoJson);
+
+        if (!arquivo.exists() || arquivo.length() == 0) {
+            return "[SERVIDOR] Arquivo JSON vazio ou não encontrado.";
+        }
+
+        try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
+            StringBuilder sb = new StringBuilder();
+            String linha;
+            while ((linha = reader.readLine()) != null) {
+                sb.append(linha);
+            }
+
+            // Converte o conteudo do arquivo em um JSONArray
+            String content = sb.toString().trim();
+            if (content.startsWith("[") && content.endsWith("]")) {
+                JSONArray clientesArray = new JSONArray(content);
+
+                // Percorre o array para localizar o cliente e alterar a senha
+                boolean clienteAlterado = false;
+                for (int i = 0; i < clientesArray.length(); i++) {
+                    JSONObject cliente = clientesArray.getJSONObject(i);
+                    if (cliente.getString("nome").equalsIgnoreCase(nome)) {
+                        cliente.put("senha", novaSenha); // Atualiza a senha
+                        clienteAlterado = true;
+                        break;
+                    }
+                }
+
+                if (clienteAlterado) {
+                    // Salva o array atualizado de volta no arquivo
+                    try (FileWriter file = new FileWriter(arquivo)) {
+                        file.write(clientesArray.toString(4));
+                        file.flush();
+                    }
+                    return "[SERVIDOR] Senha do cliente " + nome + " alterada com sucesso.";
+                } else {
+                    return "[SERVIDOR] Cliente " + nome + " não encontrado.";
+                }
+            } else {
+                return "[SERVIDOR] Formato de arquivo JSON inválido.";
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            return "[SERVIDOR] Erro ao processar a alteração da senha.";
+        }
     }
 
 }
