@@ -1,16 +1,11 @@
 import Storage.Entities.Conta.Conta;
 import org.jgroups.*;
-import org.jgroups.protocols.UDP;
-import org.jgroups.stack.DiagnosticsHandler;
-import org.jgroups.stack.ProtocolStack;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
-import java.net.InetAddress;
 
 public class Cliente {
     private JChannel channel;
-    private int idConta = 1;
 
     public static void main(String[] args) {
         try {
@@ -39,17 +34,21 @@ public class Cliente {
                     break;
 
                 if (line.startsWith("cadastrar")) {
-
                     System.out.println("Digite o nome do cliente:");
                     String nome = in.readLine().toLowerCase();
-
-                    System.out.println("Digite o CPF do cliente:");
-                    String cpf = in.readLine().toLowerCase();
 
                     System.out.println("Digite a senha do cliente:");
                     String senha = in.readLine().toLowerCase();
 
-                    enviarCadastroCliente(nome, cpf, senha);
+                    enviarCadastroCliente(nome, senha);
+                }
+
+                if (line.startsWith("consultar")) {
+
+                    System.out.println("Digite o nome do cliente:");
+                    String nome = in.readLine().toLowerCase();
+
+                    //enviarCadastroCliente(nome);
                 }
             } catch (Exception e) {
                 e.printStackTrace();
@@ -57,12 +56,12 @@ public class Cliente {
         }
     }
 
-    private void enviarCadastroCliente(String nome, String cpf, String senha) {
+    private void enviarCadastroCliente(String nome, String senha) {
         try {
-            Conta conta = new Conta(idConta, nome, senha, cpf);
+            Conta conta = new Conta(nome, senha);
             ObjectMessage msg = new ObjectMessage(null, conta);
 
-            String mensagem = "Cadastrar Cliente: Nome=" + nome + ", CPF=" + cpf + ", Senha=" + senha;
+            String mensagem = "Cadastrar Cliente: Nome=" + nome + ", Senha=" + senha;
             System.out.println("[CLIENTE] Dados enviados: " + mensagem);
 
             // Enviar os dados para o servidor

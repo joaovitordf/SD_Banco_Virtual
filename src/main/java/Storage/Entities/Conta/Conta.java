@@ -6,18 +6,15 @@ import java.math.BigDecimal;
 public class Conta implements Serializable {
     
     private int id;
-    private String numeroConta;
+    private String cpf;
     private BigDecimal saldo;
     private String nome;
     private String senha;
-    
 
-    public Conta(int id, String nome, String senha, String numeroConta){
-        this.id = id;
+
+    public Conta(String nome, String senha){
         this.nome = nome;
         this.senha = senha;
-        this.numeroConta = numeroConta;
-        saldo = BigDecimal.valueOf(1000);
     }
 
     public int getId() {
@@ -28,12 +25,28 @@ public class Conta implements Serializable {
         this.id = id;
     }
 
-    public String getNumeroConta() {
-        return numeroConta;
+    public String getNome() {
+        return nome;
     }
 
-    public void setNumeroConta(String numeroConta) {
-        this.numeroConta = numeroConta;
+    public void setNome(String nome) {
+        this.nome = nome;
+    }
+
+    public String getSenha() {
+        return senha;
+    }
+
+    public void setSenha(String senha) {
+        this.senha = senha;
+    }
+
+    public String getCpf() {
+        return cpf;
+    }
+
+    public void setCpf(String cpf) {
+        this.cpf = cpf;
     }
 
     public BigDecimal getSaldo() {
