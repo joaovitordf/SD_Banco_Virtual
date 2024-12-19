@@ -1,6 +1,5 @@
 package Controller;
 
-
 import Storage.Entities.Conta.Conta;
 import org.jgroups.*;
 import org.jgroups.blocks.*;
@@ -12,15 +11,14 @@ import org.json.JSONObject;
 import java.io.*;
 import java.util.*;
 
-
 public class Controller implements Receiver, RequestHandler {
     private JChannel channel;
     private MessageDispatcher despachante;
     private HashMap<Integer, Conta> contas = new HashMap<>();
-    final List<String> state=new LinkedList<String>();
+    final List<String> state = new LinkedList<String>();
     private int idConta = 1;
-    private Map<String, Conta> clientes = new HashMap<>();  // Mapa para armazenar clientes
-    private String caminhoJson = "C:/Users/xjoao/IdeaProjects/SD_Banco_Virtual/src/main/java/clientes.json";
+    private Map<String, Conta> clientes = new HashMap<>(); // Mapa para armazenar clientes
+    private String caminhoJson = "D:/VsCode/SD_Banco_Virtual/src/main/java/clientes.json";
 
     public static void main(String[] args) {
         try {
@@ -31,7 +29,7 @@ public class Controller implements Receiver, RequestHandler {
     }
 
     private void start() throws Exception {
-        channel=new JChannel().setReceiver(this);
+        channel = new JChannel().setReceiver(this);
         channel.connect("ChatCluster");
         channel.getState(null, 10000);
         eventLoop();
@@ -54,7 +52,7 @@ public class Controller implements Receiver, RequestHandler {
 
     public void receive(Message msg) {
         try {
-            Object object = msg.getObject();  // Objeto recebido (Conta)
+            Object object = msg.getObject(); // Objeto recebido (Conta)
 
             if (object instanceof Conta) {
                 // Desserializando o objeto Conta enviado pelo cliente
@@ -62,7 +60,7 @@ public class Controller implements Receiver, RequestHandler {
                 System.out.println("[SERVIDOR] Conta recebida: " + conta + ", Nome: " + conta.getNome());
 
                 // Armazenando a conta no mapa de clientes
-                clientes.put(conta.getNome(), conta);  // Associando a conta pelo numero da conta ou outro identificador
+                clientes.put(conta.getNome(), conta); // Associando a conta pelo numero da conta ou outro identificador
 
                 salvarCadastroEmArquivo(conta.getNome(), conta.getSenha());
             } else if (object instanceof String) {
@@ -135,15 +133,15 @@ public class Controller implements Receiver, RequestHandler {
     }
 
     public void getState(Base64.OutputStream output) throws Exception {
-        synchronized(state) {
+        synchronized (state) {
             Util.objectToStream(state, new DataOutputStream(output));
         }
     }
 
     public void setState(Base64.InputStream input) throws Exception {
         List<String> list;
-        list=(List<String>)Util.objectFromStream(new DataInputStream(input));
-        synchronized(state) {
+        list = (List<String>) Util.objectFromStream(new DataInputStream(input));
+        synchronized (state) {
             state.clear();
             state.addAll(list);
         }
@@ -151,11 +149,11 @@ public class Controller implements Receiver, RequestHandler {
         list.forEach(System.out::println);
     }
 
-    public void viewAccepted(View new_view) { //exibe alterações na composição do cluster
+    public void viewAccepted(View new_view) { // exibe alterações na composição do cluster
         System.err.println("\t\t\t\t\t[DEBUG] ** view: " + new_view);
     }
 
-    class Pedido{
+    class Pedido {
         final static int TIPO_SALDO = 0;
         final static int TIPO_TRANSFERENCIA = 1;
 
@@ -163,16 +161,17 @@ public class Controller implements Receiver, RequestHandler {
         int numConta;
 
         float valor;
+        int contaOrigem;
         int contaDestino;
 
     }
 
     @Override
     public Object handle(Message msg) throws Exception {
-        Object object = msg.getObject();  // Obtém o objeto enviado pela mensagem
+        Object object = msg.getObject(); // Obtém o objeto enviado pela mensagem
 
         if (object instanceof Pedido) {
-            Pedido pedido = (Pedido) object;  // Converte o objeto para Pedido
+            Pedido pedido = (Pedido) object; // Converte o objeto para Pedido
 
             switch (pedido.tipoPedido) {
                 case Pedido.TIPO_SALDO:
@@ -185,13 +184,81 @@ public class Controller implements Receiver, RequestHandler {
                     return conta.getSaldo();
 
                 case Pedido.TIPO_TRANSFERENCIA:
-                    return "Transferência ainda não implementada.";
+                    // Obtém as contas de origem e destino
+                    Conta contaOrigem = contas.get(pedido.numConta);
+                    Conta contaDestino = contas.get(pedido.contaDestino);
+
+                    if (contaOrigem == null || contaDestino == null) {
+                        return "[SERVIDOR] Conta de origem ou destino não encontrada.";
+                    }
+
+                    // Verifica se o valor é positivo
+                    if (pedido.valor <= 0) {
+                        return "[SERVIDOR] O valor da transferência deve ser positivo.";
+                    }
+
+                    // Verifica se há saldo suficiente
+                    if (contaOrigem.getSaldo() < pedido.valor) {
+                        return "[SERVIDOR] Saldo insuficiente na conta de origem.";
+                    }
+
+                    // Realiza a transferência
+                    contaOrigem.setSaldo(contaOrigem.getSaldo() - pedido.valor);
+                    contaDestino.setSaldo(contaDestino.getSaldo() + pedido.valor);
+
+                    // Atualiza o JSON com os novos saldos
+                    atualizarSaldoNoArquivo(contaOrigem);
+                    atualizarSaldoNoArquivo(contaDestino);
+
+                    return "[SERVIDOR] Transferência concluída com sucesso.";
 
                 default:
                     return "Pedido inválido.";
             }
         }
-        return "Mensagem inválida.";  // Se o objeto não for do tipo Pedido
+        return "Mensagem inválida."; // Se o objeto não for do tipo Pedido
+    }
+
+    private void atualizarSaldoNoArquivo(Conta conta) {
+        File arquivo = new File(caminhoJson);
+
+        if (!arquivo.exists() || arquivo.length() == 0) {
+            System.out.println("[SERVIDOR] Arquivo JSON vazio ou não encontrado.");
+            return;
+        }
+
+        try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
+            StringBuilder sb = new StringBuilder();
+            String linha;
+            while ((linha = reader.readLine()) != null) {
+                sb.append(linha);
+            }
+
+            // Converte o conteúdo do arquivo em um JSONArray
+            String content = sb.toString().trim();
+            if (content.startsWith("[") && content.endsWith("]")) {
+                JSONArray clientesArray = new JSONArray(content);
+
+                // Localiza a conta e atualiza o saldo
+                for (int i = 0; i < clientesArray.length(); i++) {
+                    JSONObject cliente = clientesArray.getJSONObject(i);
+                    if (cliente.getInt("id") == conta.getId()) {
+                        cliente.put("saldo", conta.getSaldo());
+                        break;
+                    }
+                }
+
+                // Escreve o array atualizado de volta no arquivo
+                try (FileWriter file = new FileWriter(arquivo)) {
+                    file.write(clientesArray.toString(4));
+                    file.flush();
+                }
+
+                System.out.println("[SERVIDOR] Saldo atualizado no arquivo JSON.");
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     private void salvarCadastroEmArquivo(String nome, String senha) {
@@ -208,7 +275,7 @@ public class Controller implements Receiver, RequestHandler {
             JSONArray clientesArray = new JSONArray();
             int maiorId = 0;
 
-            if (arquivo.exists() && arquivo.length() > 0) {  // Verifica se o arquivo existe e não esta vazio
+            if (arquivo.exists() && arquivo.length() > 0) { // Verifica se o arquivo existe e não esta vazio
                 // Leitura do conteudo atual do arquivo
                 try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
                     StringBuilder sb = new StringBuilder();
