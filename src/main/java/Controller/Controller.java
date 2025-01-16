@@ -182,36 +182,36 @@ public class Controller implements Receiver, RequestHandler {
                     }
                     // Retorna o saldo da conta
                     return conta.getSaldo();
-
-                case Pedido.TIPO_TRANSFERENCIA:
-                    // Obtém as contas de origem e destino
-                    Conta contaOrigem = contas.get(pedido.numConta);
-                    Conta contaDestino = contas.get(pedido.contaDestino);
-
-                    if (contaOrigem == null || contaDestino == null) {
-                        return "[SERVIDOR] Conta de origem ou destino não encontrada.";
-                    }
-
-                    // Verifica se o valor é positivo
-                    if (pedido.valor <= 0) {
-                        return "[SERVIDOR] O valor da transferência deve ser positivo.";
-                    }
-
-                    // Verifica se há saldo suficiente
-                    if (contaOrigem.getSaldo() < pedido.valor) {
-                        return "[SERVIDOR] Saldo insuficiente na conta de origem.";
-                    }
-
-                    // Realiza a transferência
-                    contaOrigem.setSaldo(contaOrigem.getSaldo() - pedido.valor);
-                    contaDestino.setSaldo(contaDestino.getSaldo() + pedido.valor);
-
-                    // Atualiza o JSON com os novos saldos
-                    atualizarSaldoNoArquivo(contaOrigem);
-                    atualizarSaldoNoArquivo(contaDestino);
-
-                    return "[SERVIDOR] Transferência concluída com sucesso.";
-
+                /*
+                 * case Pedido.TIPO_TRANSFERENCIA:
+                 * // Obtém as contas de origem e destino
+                 * Conta contaOrigem = contas.get(pedido.numConta);
+                 * Conta contaDestino = contas.get(pedido.contaDestino);
+                 * 
+                 * if (contaOrigem == null || contaDestino == null) {
+                 * return "[SERVIDOR] Conta de origem ou destino não encontrada.";
+                 * }
+                 * 
+                 * // Verifica se o valor é positivo
+                 * if (pedido.valor <= 0) {
+                 * return "[SERVIDOR] O valor da transferência deve ser positivo.";
+                 * }
+                 * 
+                 * // Verifica se há saldo suficiente
+                 * if (contaOrigem.getSaldo() < pedido.valor) {
+                 * return "[SERVIDOR] Saldo insuficiente na conta de origem.";
+                 * }
+                 * 
+                 * // Realiza a transferência
+                 * contaOrigem.setSaldo(contaOrigem.getSaldo() - pedido.valor);
+                 * contaDestino.setSaldo(contaDestino.getSaldo() + pedido.valor);
+                 * 
+                 * // Atualiza o JSON com os novos saldos
+                 * atualizarSaldoNoArquivo(contaOrigem);
+                 * atualizarSaldoNoArquivo(contaDestino);
+                 * 
+                 * return "[SERVIDOR] Transferência concluída com sucesso.";
+                 */
                 default:
                     return "Pedido inválido.";
             }
@@ -219,48 +219,49 @@ public class Controller implements Receiver, RequestHandler {
         return "Mensagem inválida."; // Se o objeto não for do tipo Pedido
     }
 
-    private void atualizarSaldoNoArquivo(Conta conta) {
-        File arquivo = new File(caminhoJson);
-
-        if (!arquivo.exists() || arquivo.length() == 0) {
-            System.out.println("[SERVIDOR] Arquivo JSON vazio ou não encontrado.");
-            return;
-        }
-
-        try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-            StringBuilder sb = new StringBuilder();
-            String linha;
-            while ((linha = reader.readLine()) != null) {
-                sb.append(linha);
-            }
-
-            // Converte o conteúdo do arquivo em um JSONArray
-            String content = sb.toString().trim();
-            if (content.startsWith("[") && content.endsWith("]")) {
-                JSONArray clientesArray = new JSONArray(content);
-
-                // Localiza a conta e atualiza o saldo
-                for (int i = 0; i < clientesArray.length(); i++) {
-                    JSONObject cliente = clientesArray.getJSONObject(i);
-                    if (cliente.getInt("id") == conta.getId()) {
-                        cliente.put("saldo", conta.getSaldo());
-                        break;
-                    }
-                }
-
-                // Escreve o array atualizado de volta no arquivo
-                try (FileWriter file = new FileWriter(arquivo)) {
-                    file.write(clientesArray.toString(4));
-                    file.flush();
-                }
-
-                System.out.println("[SERVIDOR] Saldo atualizado no arquivo JSON.");
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
+    /*
+     * private void atualizarSaldoNoArquivo(Conta conta) {
+     * File arquivo = new File(caminhoJson);
+     * 
+     * if (!arquivo.exists() || arquivo.length() == 0) {
+     * System.out.println("[SERVIDOR] Arquivo JSON vazio ou não encontrado.");
+     * return;
+     * }
+     * 
+     * try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
+     * StringBuilder sb = new StringBuilder();
+     * String linha;
+     * while ((linha = reader.readLine()) != null) {
+     * sb.append(linha);
+     * }
+     * 
+     * // Converte o conteúdo do arquivo em um JSONArray
+     * String content = sb.toString().trim();
+     * if (content.startsWith("[") && content.endsWith("]")) {
+     * JSONArray clientesArray = new JSONArray(content);
+     * 
+     * // Localiza a conta e atualiza o saldo
+     * for (int i = 0; i < clientesArray.length(); i++) {
+     * JSONObject cliente = clientesArray.getJSONObject(i);
+     * if (cliente.getInt("id") == conta.getId()) {
+     * cliente.put("saldo", conta.getSaldo());
+     * break;
+     * }
+     * }
+     * 
+     * // Escreve o array atualizado de volta no arquivo
+     * try (FileWriter file = new FileWriter(arquivo)) {
+     * file.write(clientesArray.toString(4));
+     * file.flush();
+     * }
+     * 
+     * System.out.println("[SERVIDOR] Saldo atualizado no arquivo JSON.");
+     * }
+     * } catch (Exception e) {
+     * e.printStackTrace();
+     * }
+     * }
+     */
     private void salvarCadastroEmArquivo(String nome, String senha) {
         try {
             // Verifica se o nome ja existe no json
