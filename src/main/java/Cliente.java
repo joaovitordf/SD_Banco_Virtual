@@ -4,10 +4,10 @@ import org.jgroups.*;
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 
-//private String nomeUsuarioLogado = null;
 
 public class Cliente implements Receiver {
     private JChannel channel;
+    private boolean clienteLogado = false;
 
     public static void main(String[] args) {
         try {
@@ -19,7 +19,8 @@ public class Cliente implements Receiver {
     }
 
     private void start() throws Exception {
-        channel = new JChannel();
+        channel = new JChannel("D:\\GitProjects\\SD_Banco_Virtual\\src\\main\\java\\cast.xml");
+        //channel = new JChannel();
         channel.setReceiver(this);
         channel.connect("ChatCluster");
         eventLoop();
@@ -28,112 +29,102 @@ public class Cliente implements Receiver {
 
     private void eventLoop() {
         BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
-        /*
-         * try {
-         * System.out.println("Digite seu nome:");
-         * String nome = in.readLine().toLowerCase();
-         * 
-         * System.out.println("Digite sua senha:");
-         * String senha = in.readLine().toLowerCase();
-         * 
-         * if (realizarLogin(nome, senha)) {
-         * nomeUsuarioLogado = nome;
-         * System.out.println("[CLIENTE] Login realizado com sucesso!");
-         * } else {
-         * System.out.println("[CLIENTE] Falha no login. Nome ou senha incorretos.");
-         * return;
-         * }
-         * 
-         * } catch (Exception e) {
-         * e.printStackTrace();
-         * return;
-         * }
-         */
-        while (true) {
-            System.out.println(
-                    "Digite 'cadastrar', 'alterar', 'remover, 'consultar', 'somarsaldos' ou 'sair' para encerrar:");
-            try {
-                System.out.print("> ");
-                System.out.flush();
-                String line = in.readLine().toLowerCase();
-                if (line.startsWith("sair"))
-                    break;
+        try {
+            while (!clienteLogado) {
+                System.out.println("Digite seu nome:");
+                String nomeLogin = in.readLine().toLowerCase();
 
-                if (line.startsWith("cadastrar")) {
-                    System.out.println("Digite o nome do cliente:");
-                    String nome = in.readLine().toLowerCase();
+                System.out.println("Digite sua senha:");
+                String senhaLogin = in.readLine().toLowerCase();
+                realizarLogin(nomeLogin, senhaLogin);
 
-                    System.out.println("Digite a senha do cliente:");
-                    String senha = in.readLine().toLowerCase();
-
-                    enviarCadastroCliente(nome, senha);
-                }
-
-                if (line.startsWith("remover")) {
-                    System.out.println("Digite o nome do cliente:");
-                    String nome = in.readLine();
-
-                    enviarRemocaoCliente(nome);
-                }
-
-                if (line.startsWith("alterar")) {
-                    System.out.println("Digite o nome do cliente:");
-                    String nome = in.readLine();
-
-                    System.out.println("Digite a nova senha do cliente:");
-                    String novaSenha = in.readLine();
-
-                    enviarAlteracaoCliente(nome, novaSenha);
-                }
-
-                if (line.startsWith("consultar")) {
-                    System.out.println("Digite o nome do cliente:");
-                    String nome = in.readLine();
-
-                    enviarConsultaCliente(nome);
-                }
-
-                if (line.startsWith("somarsaldos")) {
-                    enviarConsultaSomaSaldos();
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
+                Thread.sleep(1000);
             }
+
+            while (true) {
+                if (clienteLogado) {
+                    System.out.println(
+                            "Digite 'cadastrar', 'alterar', 'remover, 'consultar', 'somarsaldos' ou 'sair' para encerrar:");
+                    try {
+                        System.out.print("> ");
+                        System.out.flush();
+                        String line = in.readLine().toLowerCase();
+                        if (line.startsWith("sair"))
+                            break;
+
+                        if (line.startsWith("cadastrar")) {
+                            System.out.println("Digite o nome do cliente:");
+                            String nome = in.readLine().toLowerCase();
+
+                            System.out.println("Digite a senha do cliente:");
+                            String senha = in.readLine().toLowerCase();
+
+                            enviarCadastroCliente(nome, senha);
+                        }
+
+                        if (line.startsWith("remover")) {
+                            System.out.println("Digite o nome do cliente:");
+                            String nome = in.readLine();
+
+                            enviarRemocaoCliente(nome);
+                        }
+
+                        if (line.startsWith("alterar")) {
+                            System.out.println("Digite o nome do cliente:");
+                            String nome = in.readLine();
+
+                            System.out.println("Digite a nova senha do cliente:");
+                            String novaSenha = in.readLine();
+
+                            enviarAlteracaoCliente(nome, novaSenha);
+                        }
+
+                        if (line.startsWith("consultar")) {
+                            System.out.println("Digite o nome do cliente:");
+                            String nome = in.readLine();
+
+                            enviarConsultaCliente(nome);
+                        }
+
+                        if (line.startsWith("somarsaldos")) {
+                            enviarConsultaSomaSaldos();
+                        }
+                    } catch (Exception e) {
+                        e.printStackTrace();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+            return;
         }
     }
 
-    /*
-     * private boolean realizarLogin(String nome, String senha) {
-     * try {
-     * String mensagemLogin = "LOGIN:" + nome + ":" + senha;
-     * Message msg = new ObjectMessage(null, mensagemLogin);
-     * 
-     * System.out.println("[CLIENTE] Enviando solicitação de login...");
-     * channel.send(msg);
-     * 
-     * // implementar servidor retornando true ou false
-     * return true;
-     * } catch (Exception e) {
-     * e.printStackTrace();
-     * return false;
-     * }
-     * }
-     * 
-     * private void enviarTransacao(String remetente, String destinatario, double
-     * valor) {
-     * try {
-     * String mensagemTransacao = "TRANSAÇÃO:" + remetente + ":" + destinatario +
-     * ":" + valor;
-     * Message msg = new ObjectMessage(null, mensagemTransacao);
-     * 
-     * System.out.println("[CLIENTE] Solicitando transação de " + valor + " para " +
-     * destinatario);
-     * channel.send(msg);
-     * } catch (Exception e) {
-     * e.printStackTrace();
-     * }
-     * }
-     */
+    private void realizarLogin(String nome, String senha) {
+        try {
+            // Monta a mensagem de login no formato esperado pelo servidor
+            String mensagemLogin = "LOGIN:" + nome + ":" + senha;
+            Message msg = new ObjectMessage(null, mensagemLogin);
+
+            System.out.println("[CLIENTE] Enviando solicitação de login...");
+            channel.send(msg);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void enviarTransacao(String remetente, String destinatario, double valor) {
+        try {
+            String mensagemTransacao = "TRANSAÇÃO:" + remetente + ":" + destinatario + ":" + valor;
+            Message msg = new ObjectMessage(null, mensagemTransacao);
+
+            System.out.println("[CLIENTE] Solicitando transação de " + valor + " para " + destinatario);
+            channel.send(msg);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
     private void enviarCadastroCliente(String nome, String senha) {
         try {
             Conta conta = new Conta(nome, senha);
@@ -194,7 +185,16 @@ public class Cliente implements Receiver {
         try {
             // Recebe a resposta do servidor
             Object object = msg.getObject();
-            if (object instanceof String) {
+            if (object instanceof Boolean) {
+                boolean loginSucesso = (Boolean) object;
+                if (loginSucesso) {
+                    System.out.println("[CLIENTE] Login realizado com sucesso!");
+                    clienteLogado = true;
+                } else {
+                    System.out.println("[CLIENTE] Falha no login. Nome ou senha incorretos.");
+                    clienteLogado = false;
+                }
+            } else if (object instanceof String) {
                 System.out.println("[CLIENTE] Resposta do servidor: " + object);
             }
         } catch (Exception e) {

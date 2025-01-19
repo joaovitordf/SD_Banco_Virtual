@@ -10,6 +10,7 @@
     <UNICAST3/>
     <pbcast.STABLE/>
     <pbcast.GMS/>
+    <pbcast.STATE/>
     <SEQUENCER />
 
 </config>
