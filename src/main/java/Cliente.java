@@ -1,13 +1,19 @@
+import Model.Transferencia;
 import Storage.Entities.Conta.Conta;
 import org.jgroups.*;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
+import java.math.BigDecimal;
 
 
 public class Cliente implements Receiver {
     private JChannel channel;
     private boolean clienteLogado = false;
+    private int idContaOrigem = -1;
+    private int idContaDestino = -1;
+    private String nomeLogin = "";
+    private String senhaLogin = "";
 
     public static void main(String[] args) {
         try {
@@ -32,19 +38,27 @@ public class Cliente implements Receiver {
         try {
             while (!clienteLogado) {
                 System.out.println("Digite seu nome:");
-                String nomeLogin = in.readLine().toLowerCase();
+                nomeLogin = in.readLine().toLowerCase();
 
                 System.out.println("Digite sua senha:");
-                String senhaLogin = in.readLine().toLowerCase();
+                senhaLogin = in.readLine().toLowerCase();
                 realizarLogin(nomeLogin, senhaLogin);
 
                 Thread.sleep(1000);
+
+                if (!clienteLogado) {
+                    System.out.println("[CLIENTE] Deseja cadastrar um novo usuário com os dados informados? (s/n)");
+                    String resposta = in.readLine().toLowerCase();
+                    if (resposta.equals("s")) {
+                        enviarCadastroCliente(nomeLogin, senhaLogin);
+                    }
+                }
             }
 
             while (true) {
                 if (clienteLogado) {
                     System.out.println(
-                            "Digite 'cadastrar', 'alterar', 'remover, 'consultar', 'somarsaldos' ou 'sair' para encerrar:");
+                            "Digite 'cadastrar', 'alterar', 'remover', 'consultar', 'somarsaldos', 'transferir' ou 'sair' para encerrar:");
                     try {
                         System.out.print("> ");
                         System.out.flush();
@@ -54,12 +68,12 @@ public class Cliente implements Receiver {
 
                         if (line.startsWith("cadastrar")) {
                             System.out.println("Digite o nome do cliente:");
-                            String nome = in.readLine().toLowerCase();
+                            nomeLogin = in.readLine().toLowerCase();
 
                             System.out.println("Digite a senha do cliente:");
-                            String senha = in.readLine().toLowerCase();
+                            senhaLogin = in.readLine().toLowerCase();
 
-                            enviarCadastroCliente(nome, senha);
+                            enviarCadastroCliente(nomeLogin, senhaLogin);
                         }
 
                         if (line.startsWith("remover")) {
@@ -89,6 +103,17 @@ public class Cliente implements Receiver {
                         if (line.startsWith("somarsaldos")) {
                             enviarConsultaSomaSaldos();
                         }
+
+                        if (line.startsWith("transferir")) {
+                            System.out.println("Digite o nome da conta de destino:");
+                            String destinatario = in.readLine().toLowerCase();
+
+                            System.out.println("Digite o valor a ser transferido:");
+                            BigDecimal valor = BigDecimal.valueOf(Double.parseDouble(in.readLine()));
+
+                            enviarTransferencia(nomeLogin, destinatario, valor);
+                        }
+
                     } catch (Exception e) {
                         e.printStackTrace();
                     }
@@ -107,18 +132,6 @@ public class Cliente implements Receiver {
             Message msg = new ObjectMessage(null, mensagemLogin);
 
             System.out.println("[CLIENTE] Enviando solicitação de login...");
-            channel.send(msg);
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void enviarTransacao(String remetente, String destinatario, double valor) {
-        try {
-            String mensagemTransacao = "TRANSAÇÃO:" + remetente + ":" + destinatario + ":" + valor;
-            Message msg = new ObjectMessage(null, mensagemTransacao);
-
-            System.out.println("[CLIENTE] Solicitando transação de " + valor + " para " + destinatario);
             channel.send(msg);
         } catch (Exception e) {
             e.printStackTrace();
@@ -144,7 +157,7 @@ public class Cliente implements Receiver {
     private void enviarConsultaCliente(String nome) {
         try {
             // Envia o nome do cliente para consulta
-            String mensagemConsulta = "CONSULTAR:" + nome;
+            String mensagemConsulta = "CONSULTAR_SALDO:" + nome;
             Message msg = new ObjectMessage(null, mensagemConsulta);
 
             System.out.println("[CLIENTE] Solicitando dados para o cliente: " + nome);
@@ -185,6 +198,7 @@ public class Cliente implements Receiver {
         try {
             // Recebe a resposta do servidor
             Object object = msg.getObject();
+
             if (object instanceof Boolean) {
                 boolean loginSucesso = (Boolean) object;
                 if (loginSucesso) {
@@ -195,7 +209,28 @@ public class Cliente implements Receiver {
                     clienteLogado = false;
                 }
             } else if (object instanceof String) {
-                System.out.println("[CLIENTE] Resposta do servidor: " + object);
+                String mensagem = (String) object;
+                System.out.println(mensagem);
+
+                if (mensagem.startsWith("[SERVIDOR] Conta encontrada:")) {
+                    String[] partes = mensagem.split("="); // Divide a string por "="
+                    if (partes.length == 2) {
+                        try {
+                            int idConta = Integer.parseInt(partes[1].trim());
+                            if (mensagem.contains("origem")) {
+                                idContaOrigem = idConta;
+                                System.out.println("[CLIENTE] ID da conta de origem: " + idContaOrigem);
+                            } else if (mensagem.contains("destino")) {
+                                idContaDestino = idConta;
+                                System.out.println("[CLIENTE] ID da conta de destino: " + idContaDestino);
+                            }
+                        } catch (NumberFormatException e) {
+                            System.out.println("[CLIENTE] Erro ao processar o ID da conta: " + e.getMessage());
+                        }
+                    }
+                } else {
+                    System.out.println("[CLIENTE] Resposta do servidor: " + mensagem);
+                }
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -210,6 +245,37 @@ public class Cliente implements Receiver {
 
             System.out.println("[CLIENTE] Solicitando alteração da senha para o cliente: " + nome);
             channel.send(msg);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    // Método para enviar a solicitação de transferência
+    private void enviarTransferencia(String remetente, String destinatario, BigDecimal valor) {
+        try {
+            // Enviar solicitação ao servidor para buscar a conta de origem
+            String mensagemOrigem = "CONSULTAR_ID_ORIGEM:" + remetente;
+            Message msgOrigem = new ObjectMessage(null, mensagemOrigem);
+            channel.send(msgOrigem);
+
+            // Enviar solicitação ao servidor para buscar a conta de destino
+            String mensagemDestino = "CONSULTAR_ID_DESTINO:" + destinatario;
+            Message msgDestino = new ObjectMessage(null, mensagemDestino);
+            channel.send(msgDestino);
+
+            Thread.sleep(1000);
+
+            Transferencia transferencia = new Transferencia();
+            transferencia.setIdOrigem(idContaOrigem);
+            transferencia.setIdDestino(idContaDestino);
+            transferencia.setValor(valor);
+
+            // Envia o pedido de transferência para o servidor
+            ObjectMessage msg = new ObjectMessage(null, transferencia);
+
+            System.out.println("[CLIENTE] Solicitando transferência de " + valor + " de " + remetente + " para " + destinatario);
+            channel.send(msg);
+
         } catch (Exception e) {
             e.printStackTrace();
         }

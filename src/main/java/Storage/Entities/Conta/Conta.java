@@ -1,5 +1,7 @@
 package Storage.Entities.Conta;
 
+import Model.Transferencia;
+
 import java.io.Serializable;
 import java.math.BigDecimal;
 
@@ -10,7 +12,12 @@ public class Conta implements Serializable {
     private BigDecimal saldo;
     private String nome;
     private String senha;
+    private Transferencia transferencia;
 
+    public Conta(int id, Transferencia transferencia){
+        this.id = id;
+        this.transferencia = transferencia;
+    }
 
     public Conta(String nome, String senha){
         this.nome = nome;
