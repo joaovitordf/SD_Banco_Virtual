@@ -1,5 +1,6 @@
 package Controller;
 
+import Model.ClienteCallback;
 import Model.Transferencia;
 import Model.BancoGateway;
 import Model.BancoGatewayInterface;
@@ -26,6 +27,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
     final List<String> state = new LinkedList<String>();
     private int idConta = 1;
     private Map<String, Conta> clientes = new HashMap<>(); // Mapa para armazenar clientes
+    private List<ClienteCallback> clientesRegistrados = new ArrayList<>();
     private String caminhoJson = "C:\\Users\\xjoao\\IdeaProjects\\SD_Banco_Virtual\\src\\main\\java\\clientes.json";
 
     public static void main(String[] args) {
@@ -33,6 +35,24 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
             new Controller().start();
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    @Override
+    public void registrarClienteCallback(ClienteCallback cliente) throws RemoteException {
+        clientesRegistrados.add(cliente);
+        System.out.println("[SERVIDOR] Cliente registrado para atualizações.");
+    }
+
+    @Override
+    public void notificarClientes(String mensagem) throws RemoteException {
+        for (ClienteCallback cliente : clientesRegistrados) {
+            try {
+                cliente.notificarAtualizacao(mensagem);
+            } catch (RemoteException e) {
+                System.out.println("[SERVIDOR] Falha ao notificar um cliente.");
+                e.printStackTrace();
+            }
         }
     }
 

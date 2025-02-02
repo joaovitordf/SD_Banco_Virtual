@@ -1,5 +1,6 @@
 import Model.Transferencia;
 import Model.BancoGatewayInterface;
+import Model.ClienteCallback;
 import Storage.Entities.Conta.Conta;
 import org.jgroups.*;
 
@@ -8,8 +9,9 @@ import java.io.InputStreamReader;
 import java.math.BigDecimal;
 import java.rmi.Naming;
 import java.rmi.RemoteException;
+import java.rmi.server.UnicastRemoteObject;
 
-public class Cliente implements Receiver {
+public class Cliente extends UnicastRemoteObject implements Receiver, ClienteCallback {
     private JChannel channel;
     private boolean clienteLogado = false;
     private int idContaOrigem = -1;
@@ -17,6 +19,10 @@ public class Cliente implements Receiver {
     private String nomeLogin = "";
     private String senhaLogin = "";
     private BancoGatewayInterface gateway; // Interface RMI para o gateway
+
+    public Cliente() throws RemoteException {
+        super();
+    }
 
     public static void main(String[] args) {
         try {
@@ -27,14 +33,21 @@ public class Cliente implements Receiver {
         }
     }
 
+    @Override
+    public void notificarAtualizacao(String mensagem) throws RemoteException {
+        System.out.println("[CLIENTE] Atualização recebida do servidor: " + mensagem);
+    }
+
     private void start() throws Exception {
         // Conectar ao gateway via RMI
-        gateway = (BancoGatewayInterface) Naming.lookup("rmi://localhost/BancoGateway");
+        gateway = (BancoGatewayInterface) Naming.lookup("rmi://192.168.1.106/BancoGateway");
         System.out.println("[CLIENTE] Conectado ao gateway via RMI.");
 
         channel = new JChannel("C:\\Users\\xjoao\\IdeaProjects\\SD_Banco_Virtual\\src\\main\\java\\cast.xml");
         channel.setReceiver(this);
         channel.connect("ChatCluster");
+
+        gateway.registrarClienteCallback(this);
         eventLoop();
         channel.close();
     }
