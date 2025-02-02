@@ -32,7 +32,7 @@ public class Cliente implements Receiver {
         gateway = (BancoGatewayInterface) Naming.lookup("rmi://localhost/BancoGateway");
         System.out.println("[CLIENTE] Conectado ao gateway via RMI.");
 
-        channel = new JChannel("D:\\GitProjects\\SD_Banco_Virtual\\src\\main\\java\\cast.xml");
+        channel = new JChannel("C:\\Users\\xjoao\\IdeaProjects\\SD_Banco_Virtual\\src\\main\\java\\cast.xml");
         channel.setReceiver(this);
         channel.connect("ChatCluster");
         eventLoop();

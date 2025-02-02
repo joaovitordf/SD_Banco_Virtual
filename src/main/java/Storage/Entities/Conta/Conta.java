@@ -24,6 +24,12 @@ public class Conta implements Serializable {
         this.senha = senha;
     }
 
+    public Conta(int id, String nome, BigDecimal valor) {
+        this.id = id;
+        this.nome = nome;
+        this.saldo = valor;
+    }
+
     public int getId() {
         return id;
     }

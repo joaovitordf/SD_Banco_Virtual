@@ -1,3 +1,5 @@
+package Model;
+
 import Model.Transferencia;
 import Model.BancoGatewayInterface;
 import Storage.Entities.Conta.Conta;
@@ -18,12 +20,12 @@ public class BancoGateway extends UnicastRemoteObject implements BancoGatewayInt
     private MessageDispatcher despachante;
     private HashMap<Integer, Conta> contas = new HashMap<>();
     private Map<String, Conta> clientes = new HashMap<>();
-    private String caminhoJson = "D:\\GitProjects\\SD_Banco_Virtual\\src\\main\\java\\clientes.json";
+    private String caminhoJson = "C:\\Users\\xjoao\\IdeaProjects\\SD_Banco_Virtual\\src\\main\\java\\clientes.json";
 
     public BancoGateway() throws RemoteException {
         try {
             // Conectar ao canal JGroups
-            channel = new JChannel("D:\\GitProjects\\SD_Banco_Virtual\\src\\main\\java\\cast.xml");
+            channel = new JChannel("C:\\Users\\xjoao\\IdeaProjects\\SD_Banco_Virtual\\src\\main\\java\\cast.xml");
             channel.setReceiver(new Receiver() {
                 @Override
                 public void receive(Message msg) {
@@ -94,8 +96,8 @@ public class BancoGateway extends UnicastRemoteObject implements BancoGatewayInt
     public boolean realizarTransferencia(String remetente, String destinatario, BigDecimal valor)
             throws RemoteException {
         // Realiza a transferência entre contas
-        int idOrigem = consultarIdClienteOrigem(remetente);
-        int idDestino = consultarIdClienteDestino(destinatario);
+        int idOrigem = Integer.parseInt(consultarIdClienteOrigem(remetente));
+        int idDestino = Integer.parseInt(consultarIdClienteDestino(destinatario));
 
         if (idOrigem == -1 || idDestino == -1) {
             return false; // Conta de origem ou destino não encontrada
@@ -236,7 +238,7 @@ public class BancoGateway extends UnicastRemoteObject implements BancoGatewayInt
             }
 
             // Incrementa o ID para o próximo cliente
-            idConta = maiorId + 1;
+            int idConta = maiorId + 1;
 
             // Cria um objeto JSON com os dados do cliente
             JSONObject json = new JSONObject();
@@ -353,38 +355,6 @@ public class BancoGateway extends UnicastRemoteObject implements BancoGatewayInt
         return "[SERVIDOR] Cliente não encontrado.";
     }
 
-    private String consultarIdClienteOrigem(String nome) {
-        File arquivo = new File(caminhoJson);
-
-        if (arquivo.exists() && arquivo.length() > 0) {
-            try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-                StringBuilder sb = new StringBuilder();
-                String linha;
-                while ((linha = reader.readLine()) != null) {
-                    sb.append(linha);
-                }
-
-                // Converte o conteúdo do arquivo em um array JSON
-                String content = sb.toString().trim();
-                if (content.startsWith("[") && content.endsWith("]")) {
-                    JSONArray clientesArray = new JSONArray(content);
-
-                    for (int i = 0; i < clientesArray.length(); i++) {
-                        JSONObject cliente = clientesArray.getJSONObject(i);
-                        if (cliente.getString("nome").equalsIgnoreCase(nome)) {
-                            // Se o cliente for encontrado, retorne o ID da conta no formato esperado
-                            int idConta = cliente.getInt("id"); // Supondo que o ID está no campo "id"
-                            return "[SERVIDOR] Conta encontrada: origem=" + idConta; // Retorna a mensagem com o ID da
-                                                                                     // conta
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-        return "[SERVIDOR] Cliente não encontrado."; // Caso o cliente não seja encontrado
-    }
 
     private String consultarIdClienteDestino(String nome) {
         File arquivo = new File(caminhoJson);

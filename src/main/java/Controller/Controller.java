@@ -26,7 +26,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
     final List<String> state = new LinkedList<String>();
     private int idConta = 1;
     private Map<String, Conta> clientes = new HashMap<>(); // Mapa para armazenar clientes
-    private String caminhoJson = "D:\\GitProjects\\SD_Banco_Virtual\\src\\main\\java\\clientes.json";
+    private String caminhoJson = "C:\\Users\\xjoao\\IdeaProjects\\SD_Banco_Virtual\\src\\main\\java\\clientes.json";
 
     public static void main(String[] args) {
         try {
@@ -38,7 +38,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
     private void start() throws Exception {
         // Conectar ao canal JGroups
-        channel = new JChannel("D:\\GitProjects\\SD_Banco_Virtual\\src\\main\\java\\cast.xml");
+        channel = new JChannel("C:\\Users\\xjoao\\IdeaProjects\\SD_Banco_Virtual\\src\\main\\java\\cast.xml");
         channel.setReceiver(this);
         channel.connect("ChatCluster");
         channel.getState(null, 10000);
@@ -105,8 +105,8 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
     @Override
     public boolean realizarTransferencia(String remetente, String destinatario, BigDecimal valor)
             throws RemoteException {
-        int idOrigem = consultarIdClienteOrigem(remetente);
-        int idDestino = consultarIdClienteDestino(destinatario);
+        int idOrigem = Integer.parseInt(consultarIdClienteOrigem(remetente));
+        int idDestino = Integer.parseInt(consultarIdClienteDestino(destinatario));
 
         if (idOrigem == -1 || idDestino == -1) {
             return false; // Conta de origem ou destino não encontrada
