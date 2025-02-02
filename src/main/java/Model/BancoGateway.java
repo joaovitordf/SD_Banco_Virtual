@@ -1,81 +1,62 @@
-package Controller;
-
 import Model.Transferencia;
-import Model.BancoGateway;
 import Model.BancoGatewayInterface;
 import Storage.Entities.Conta.Conta;
 import org.jgroups.*;
 import org.jgroups.blocks.*;
 import org.jgroups.util.*;
-import org.jgroups.util.Base64;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.*;
 import java.math.BigDecimal;
 import java.rmi.RemoteException;
-import java.rmi.registry.LocateRegistry;
-import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.*;
 
-public class Controller implements Receiver, RequestHandler, BancoGatewayInterface {
+public class BancoGateway extends UnicastRemoteObject implements BancoGatewayInterface {
     private JChannel channel;
     private MessageDispatcher despachante;
     private HashMap<Integer, Conta> contas = new HashMap<>();
-    final List<String> state = new LinkedList<String>();
-    private int idConta = 1;
-    private Map<String, Conta> clientes = new HashMap<>(); // Mapa para armazenar clientes
+    private Map<String, Conta> clientes = new HashMap<>();
     private String caminhoJson = "D:\\GitProjects\\SD_Banco_Virtual\\src\\main\\java\\clientes.json";
 
-    public static void main(String[] args) {
+    public BancoGateway() throws RemoteException {
         try {
-            new Controller().start();
+            // Conectar ao canal JGroups
+            channel = new JChannel("D:\\GitProjects\\SD_Banco_Virtual\\src\\main\\java\\cast.xml");
+            channel.setReceiver(new Receiver() {
+                @Override
+                public void receive(Message msg) {
+                    // Lógica para receber mensagens do cluster
+                    System.out.println("[GATEWAY] Mensagem recebida do cluster: " + msg.getObject());
+                }
+
+                @Override
+                public void viewAccepted(View new_view) {
+                    System.out.println("[GATEWAY] Nova visão do cluster: " + new_view);
+                }
+            });
+            channel.connect("ChatCluster");
+            System.out.println("[GATEWAY] Conectado ao cluster JGroups.");
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
 
-    private void start() throws Exception {
-        // Conectar ao canal JGroups
-        channel = new JChannel("D:\\GitProjects\\SD_Banco_Virtual\\src\\main\\java\\cast.xml");
-        channel.setReceiver(this);
-        channel.connect("ChatCluster");
-        channel.getState(null, 10000);
-
-        // Registrar o servidor no RMI Registry
-        BancoGatewayInterface stub = (BancoGatewayInterface) UnicastRemoteObject.exportObject(this, 0);
-        Registry registry = LocateRegistry.createRegistry(1099);
-        registry.rebind("BancoGateway", stub);
-        System.out.println("[SERVIDOR] Servidor registrado no RMI Registry.");
-
-        eventLoop();
-        channel.close();
-    }
-
-    private void eventLoop() throws Exception {
-        System.out.println("[DEBUG] Controller ativo. Digite 'sair' para encerrar.");
-        try (Scanner scanner = new Scanner(System.in)) {
-            while (true) {
-                Thread.sleep(1000);
-                String line = scanner.nextLine().toLowerCase();
-                if ("sair".equals(line)) {
-                    break;
-                }
-            }
-        }
-    }
-
     @Override
     public boolean realizarLogin(String nome, String senha) throws RemoteException {
+        // Verifica as credenciais no arquivo JSON
         return verificarCredenciais(nome, senha);
     }
 
     @Override
     public boolean cadastrarCliente(String nome, String senha) throws RemoteException {
-        if (clientes.containsKey(nome)) {
-            return false; // Cliente já existe
+        // Verifica se o cliente já existe
+        if (clienteExistente(nome)) {
+            return false;
         }
+
+        // Cria uma nova conta e a adiciona ao mapa de clientes
         Conta conta = new Conta(nome, senha);
         clientes.put(nome, conta);
         salvarCadastroEmArquivo(nome, senha);
@@ -84,27 +65,35 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
     @Override
     public String consultarSaldo(String nome) throws RemoteException {
+        // Consulta o saldo do cliente no arquivo JSON
         return consultarSaldoClientePorNome(nome);
     }
 
     @Override
     public BigDecimal somarSaldos() throws RemoteException {
-        return new BigDecimal(somarSaldosClientes());
+        // Soma os saldos de todos os clientes no arquivo JSON
+        String resultado = somarSaldosClientes();
+        return new BigDecimal(resultado.replace("[SERVIDOR] A soma dos saldos é: ", ""));
     }
 
     @Override
     public boolean removerCliente(String nome) throws RemoteException {
-        return removerClienteDoArquivo(nome).startsWith("[SERVIDOR] Cliente removido com sucesso!");
+        // Remove o cliente do arquivo JSON
+        String resultado = removerClienteDoArquivo(nome);
+        return resultado.startsWith("[SERVIDOR] Cliente removido com sucesso.");
     }
 
     @Override
     public boolean alterarSenha(String nome, String novaSenha) throws RemoteException {
-        return alterarSenhaCliente(nome, novaSenha).startsWith("[SERVIDOR] Senha alterada com sucesso!");
+        // Altera a senha do cliente no arquivo JSON
+        String resultado = alterarSenhaCliente(nome, novaSenha);
+        return resultado.startsWith("[SERVIDOR] Senha do cliente alterada com sucesso.");
     }
 
     @Override
     public boolean realizarTransferencia(String remetente, String destinatario, BigDecimal valor)
             throws RemoteException {
+        // Realiza a transferência entre contas
         int idOrigem = consultarIdClienteOrigem(remetente);
         int idDestino = consultarIdClienteDestino(destinatario);
 
@@ -127,277 +116,6 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         atualizarSaldoNoArquivo(contaDestino);
 
         return true;
-    }
-
-    public void receive(Message msg) {
-        try {
-            Object object = msg.getObject(); // Objeto recebido (Conta)
-
-            if (object instanceof Conta) {
-                // Desserializando o objeto Conta enviado pelo cliente
-                Conta conta = (Conta) object;
-                System.out.println("[SERVIDOR] Conta recebida: " + conta + ", Nome: " + conta.getNome());
-
-                // Armazenando a conta no mapa de clientes
-                clientes.put(conta.getNome(), conta); // Associando a conta pelo numero da conta ou outro identificador
-
-                salvarCadastroEmArquivo(conta.getNome(), conta.getSenha());
-            } else if (object instanceof String) {
-                String mensagem = (String) object;
-
-                if (mensagem.startsWith("LOGIN:")) {
-                    // Extrai as credenciais
-                    String[] partes = mensagem.split(":");
-                    String nomeCliente = partes[1];
-                    String senhaCliente = partes[2];
-
-                    boolean loginValido = verificarCredenciais(nomeCliente, senhaCliente);
-
-                    // Envia a resposta de volta para o cliente
-                    Message resposta = new ObjectMessage(msg.getSrc(), loginValido);
-                    channel.send(resposta);
-                }
-
-                if (mensagem.startsWith("CONSULTAR_ID_ORIGEM:")) {
-                    // Extrai o nome do cliente a ser consultado
-                    String nomeCliente = mensagem.substring(20).trim(); // Corrigido para 13 pois "CONSULTAR_ID:" tem 13
-                                                                        // caracteres
-
-                    // Consulta os dados do cliente e obtém o ID da conta
-                    String respostaConsulta = consultarIdClienteOrigem(nomeCliente);
-
-                    // Envia a resposta de volta para o cliente
-                    Message resposta = new ObjectMessage(msg.getSrc(), respostaConsulta);
-                    channel.send(resposta);
-                }
-
-                if (mensagem.startsWith("CONSULTAR_ID_DESTINO:")) {
-                    // Extrai o nome do cliente a ser consultado
-                    String nomeCliente = mensagem.substring(21).trim(); // Corrigido para 13 pois "CONSULTAR_ID:" tem 13
-                                                                        // caracteres
-
-                    // Consulta os dados do cliente e obtém o ID da conta
-                    String respostaConsulta = consultarIdClienteDestino(nomeCliente);
-
-                    // Envia a resposta de volta para o cliente
-                    Message resposta = new ObjectMessage(msg.getSrc(), respostaConsulta);
-                    channel.send(resposta);
-                }
-
-                if (mensagem.startsWith("CONSULTAR_SALDO:")) {
-                    // Extrai o saldo do cliente a ser consultado
-                    String nomeCliente = mensagem.substring(16).trim();
-
-                    // Consulta os dados do cliente
-                    String respostaConsulta = consultarSaldoClientePorNome(nomeCliente);
-
-                    // Envia a resposta de volta para o cliente
-                    Message resposta = new ObjectMessage(msg.getSrc(), respostaConsulta);
-                    channel.send(resposta);
-                }
-
-                if (((String) object).startsWith("SOMAR_SALDOS")) {
-                    System.out.println("[SERVIDOR] Solicitação de soma dos saldos recebida.");
-                    String resultado = somarSaldosClientes();
-                    try {
-                        // Enviar o resultado de volta ao cliente
-                        Message resposta = new ObjectMessage(msg.getSrc(), resultado);
-                        channel.send(resposta);
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
-                }
-
-                if (((String) object).startsWith("REMOVER:")) {
-                    String nomeCliente = ((String) object).substring(8).trim(); // Extrai o nome após 'REMOVER:'
-                    System.out.println("[SERVIDOR] Solicitação de remoção para o cliente: " + nomeCliente);
-
-                    String resultado = removerClienteDoArquivo(nomeCliente); // Remove o cliente do JSON
-
-                    try {
-                        // Enviar a resposta ao cliente
-                        Message resposta = new ObjectMessage(msg.getSrc(), resultado);
-                        channel.send(resposta);
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
-                }
-
-                if (((String) object).startsWith("ALTERAR:")) {
-                    String[] partes = ((String) object).split(":");
-                    if (partes.length == 3) {
-                        String nomeCliente = partes[1].trim();
-                        String novaSenha = partes[2].trim();
-
-                        System.out.println("[SERVIDOR] Solicitação de alteração para o cliente: " + nomeCliente);
-
-                        String resultado = alterarSenhaCliente(nomeCliente, novaSenha); // Altera a senha no JSON
-
-                        try {
-                            // Enviar a resposta ao cliente
-                            Message resposta = new ObjectMessage(msg.getSrc(), resultado);
-                            channel.send(resposta);
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                        }
-                    } else {
-                        System.out.println("[SERVIDOR] Mensagem de alteração mal formatada.");
-                    }
-                }
-            } else if (object instanceof Pedido) {
-                Pedido pedido = (Pedido) object; // Converte o objeto para Pedido
-
-                switch (pedido.tipoPedido) {
-                    case Pedido.TIPO_SALDO:
-                        // Recupera a conta do mapa 'contas' usando o numero da conta
-                        Conta conta = contas.get(pedido.numConta);
-                        if (conta == null) {
-                            // Envia mensagem de erro para o cliente
-                            Message respostaSaldo = new ObjectMessage(msg.getSrc(), "Conta não encontrada.");
-                            channel.send(respostaSaldo);
-                        } else {
-                            // Retorna o saldo da conta
-                            Message respostaSaldo = new ObjectMessage(msg.getSrc(), conta.getSaldo());
-                            channel.send(respostaSaldo);
-                        }
-                        break;
-
-                    default:
-                        // Envia mensagem de erro para o cliente caso o tipo de pedido seja inválido
-                        Message respostaInvalid = new ObjectMessage(msg.getSrc(), "Pedido inválido.");
-                        channel.send(respostaInvalid);
-                        break;
-                }
-            } else if (object instanceof Transferencia transferencia) {
-                // Obtém as contas de origem e destino
-                Conta contaOrigem = new Conta(transferencia.getIdOrigem(), transferencia);
-                Conta contaDestino = new Conta(transferencia.getIdDestino(), transferencia);
-
-                BigDecimal saldoOrigem = consultarSaldoClientePorId(transferencia.getIdOrigem());
-                BigDecimal saldoDestino = consultarSaldoClientePorId(transferencia.getIdDestino());
-
-                if (saldoOrigem != null && saldoDestino != null) {
-                    contaOrigem.setSaldo(saldoOrigem);
-                    contaDestino.setSaldo(saldoDestino);
-                    // Verifica se o valor é positivo
-                    if (transferencia.getValor().compareTo(BigDecimal.ZERO) <= 0) {
-                        // Envia mensagem de erro para o cliente
-                        Message respostaTransferencia = new ObjectMessage(msg.getSrc(),
-                                "[SERVIDOR] O valor da transferência deve ser positivo.");
-                        channel.send(respostaTransferencia);
-                    } else if (contaOrigem.getSaldo().compareTo(transferencia.getValor()) < 0) {
-                        // Verifica se há saldo suficiente
-                        Message respostaTransferencia = new ObjectMessage(msg.getSrc(),
-                                "[SERVIDOR] Saldo insuficiente na conta de origem.");
-                        channel.send(respostaTransferencia);
-                    } else {
-                        // Realiza a transferência
-                        contaOrigem.setSaldo(contaOrigem.getSaldo().subtract(transferencia.getValor()));
-                        contaDestino.setSaldo(contaDestino.getSaldo().add(transferencia.getValor()));
-
-                        // Atualiza o JSON com os novos saldos
-                        atualizarSaldoNoArquivo(contaOrigem);
-                        atualizarSaldoNoArquivo(contaDestino);
-
-                        // Envia mensagem de sucesso para o cliente
-                        Message respostaTransferencia = new ObjectMessage(msg.getSrc(),
-                                "[SERVIDOR] Transferência concluída com sucesso.");
-                        channel.send(respostaTransferencia);
-                    }
-                } else {
-                    // Envia mensagem de erro para o cliente caso a mensagem seja inválida
-                    Message respostaInvalid = new ObjectMessage(msg.getSrc(), "Saldos não encontrados.");
-                    channel.send(respostaInvalid);
-                }
-            } else {
-                // Envia mensagem de erro para o cliente caso a mensagem seja inválida
-                Message respostaInvalid = new ObjectMessage(msg.getSrc(), "Mensagem inválida.");
-                channel.send(respostaInvalid);
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    public void getState(Base64.OutputStream output) throws Exception {
-        synchronized (state) {
-            Util.objectToStream(state, new DataOutputStream(output));
-        }
-    }
-
-    public void setState(Base64.InputStream input) throws Exception {
-        List<String> list;
-        list = (List<String>) Util.objectFromStream(new DataInputStream(input));
-        synchronized (state) {
-            state.clear();
-            state.addAll(list);
-        }
-        System.out.println(list.size() + " messages in chat history):");
-        list.forEach(System.out::println);
-    }
-
-    public void viewAccepted(View new_view) { // exibe alterações na composição do cluster
-        System.err.println("\t\t\t\t\t[DEBUG] ** view: " + new_view);
-    }
-
-    class Pedido {
-        final static int TIPO_SALDO = 0;
-        final static int TIPO_TRANSFERENCIA = 1;
-
-        int tipoPedido;
-        int numConta;
-
-        float valor;
-        int contaOrigem;
-        int contaDestino;
-    }
-
-    @Override
-    public Object handle(Message msg) throws Exception {
-        Object object = msg.getObject(); // Obtém o objeto enviado pela mensagem
-
-        if (object instanceof Pedido pedido) {
-            switch (pedido.tipoPedido) {
-                case Pedido.TIPO_SALDO:
-                    // Recupera a conta do mapa 'contas' usando o numero da conta
-                    Conta conta = contas.get(pedido.numConta);
-                    if (conta == null) {
-                        return "Conta não encontrada.";
-                    }
-                    // Retorna o saldo da conta
-                    return conta.getSaldo();
-            }
-        }
-        if (object instanceof Transferencia transferencia) {
-            // Obtém as contas de origem e destino
-            Conta contaOrigem = contas.get(transferencia.getIdOrigem());
-            Conta contaDestino = contas.get(transferencia.getIdDestino());
-
-            if (contaOrigem == null || contaDestino == null) {
-                return "[SERVIDOR] Conta de origem ou destino não encontrada.";
-            }
-
-            // Verifica se o valor é positivo
-            if (transferencia.getValor().compareTo(BigDecimal.ZERO) <= 0) {
-                return "[SERVIDOR] O valor da transferência deve ser positivo.";
-            }
-
-            // Verifica se há saldo suficiente
-            if (contaOrigem.getSaldo().compareTo(transferencia.getValor()) < 0) {
-                return "[SERVIDOR] Saldo insuficiente na conta de origem.";
-            }
-
-            // Realiza a transferência
-            contaOrigem.setSaldo(contaOrigem.getSaldo().subtract(transferencia.getValor()));
-            contaDestino.setSaldo(contaDestino.getSaldo().add(transferencia.getValor()));
-
-            // Atualiza o JSON com os novos saldos
-            atualizarSaldoNoArquivo(contaOrigem);
-            atualizarSaldoNoArquivo(contaDestino);
-
-            return "[SERVIDOR] Transferência concluída com sucesso.";
-        }
-        return "Mensagem inválida."; // Se o objeto não for do tipo Pedido
     }
 
     private void atualizarSaldoNoArquivo(Conta conta) {
@@ -440,6 +158,39 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    private String consultarIdClienteOrigem(String nome) {
+        File arquivo = new File(caminhoJson);
+
+        if (arquivo.exists() && arquivo.length() > 0) {
+            try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
+                StringBuilder sb = new StringBuilder();
+                String linha;
+                while ((linha = reader.readLine()) != null) {
+                    sb.append(linha);
+                }
+
+                // Converte o conteúdo do arquivo em um array JSON
+                String content = sb.toString().trim();
+                if (content.startsWith("[") && content.endsWith("]")) {
+                    JSONArray clientesArray = new JSONArray(content);
+
+                    for (int i = 0; i < clientesArray.length(); i++) {
+                        JSONObject cliente = clientesArray.getJSONObject(i);
+                        if (cliente.getString("nome").equalsIgnoreCase(nome)) {
+                            // Se o cliente for encontrado, retorne o ID da conta no formato esperado
+                            int idConta = cliente.getInt("id"); // Supondo que o ID está no campo "id"
+                            return "[SERVIDOR] Conta encontrada: origem=" + idConta; // Retorna a mensagem com o ID da
+                                                                                     // conta
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+        return "[SERVIDOR] Cliente não encontrado."; // Caso o cliente não seja encontrado
     }
 
     private void salvarCadastroEmArquivo(String nome, String senha) {
