@@ -1,6 +1,5 @@
 package Controller;
 
-import Model.ClienteCallback;
 import Model.Transferencia;
 import Model.BancoGateway;
 import Model.BancoGatewayInterface;
@@ -27,7 +26,6 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
     final List<String> state = new LinkedList<String>();
     private int idConta = 1;
     private Map<String, Conta> clientes = new HashMap<>(); // Mapa para armazenar clientes
-    private List<ClienteCallback> clientesRegistrados = new ArrayList<>();
     private String caminhoJson = "C:\\Users\\xjoao\\IdeaProjects\\SD_Banco_Virtual\\src\\main\\java\\clientes.json";
 
     public static void main(String[] args) {
@@ -35,24 +33,6 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
             new Controller().start();
         } catch (Exception e) {
             e.printStackTrace();
-        }
-    }
-
-    @Override
-    public void registrarClienteCallback(ClienteCallback cliente) throws RemoteException {
-        clientesRegistrados.add(cliente);
-        System.out.println("[SERVIDOR] Cliente registrado para atualizações.");
-    }
-
-    @Override
-    public void notificarClientes(String mensagem) throws RemoteException {
-        for (ClienteCallback cliente : clientesRegistrados) {
-            try {
-                cliente.notificarAtualizacao(mensagem);
-            } catch (RemoteException e) {
-                System.out.println("[SERVIDOR] Falha ao notificar um cliente.");
-                e.printStackTrace();
-            }
         }
     }
 
@@ -125,8 +105,10 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
     @Override
     public boolean realizarTransferencia(String remetente, String destinatario, BigDecimal valor)
             throws RemoteException {
-        int idOrigem = Integer.parseInt(consultarIdClienteOrigem(remetente));
-        int idDestino = Integer.parseInt(consultarIdClienteDestino(destinatario));
+        String origem = consultarIdClienteOrigem(remetente);
+        int idOrigem = extrairIdConta(origem);
+        String destino = consultarIdClienteOrigem(destinatario);
+        int idDestino = extrairIdConta(destino);
 
         if (idOrigem == -1 || idDestino == -1) {
             return false; // Conta de origem ou destino não encontrada
@@ -147,6 +129,17 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         atualizarSaldoNoArquivo(contaDestino);
 
         return true;
+    }
+
+    private int extrairIdConta(String resposta) {
+        try {
+            // Acha o número no final da string usando regex
+            String numero = resposta.replaceAll("[^0-9]", "");
+            return Integer.parseInt(numero);
+        } catch (NumberFormatException e) {
+            System.out.println("[ERRO] Não foi possível extrair o ID da conta: " + resposta);
+            return -1; // Retorna -1 se houver erro
+        }
     }
 
     public void receive(Message msg) {

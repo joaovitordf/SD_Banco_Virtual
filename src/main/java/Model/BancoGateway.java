@@ -20,7 +20,6 @@ public class BancoGateway extends UnicastRemoteObject implements BancoGatewayInt
     private MessageDispatcher despachante;
     private HashMap<Integer, Conta> contas = new HashMap<>();
     private Map<String, Conta> clientes = new HashMap<>();
-    private List<ClienteCallback> clientesRegistrados = new ArrayList<>();
     private String caminhoJson = "C:\\Users\\xjoao\\IdeaProjects\\SD_Banco_Virtual\\src\\main\\java\\clientes.json";
 
     public BancoGateway() throws RemoteException {
@@ -42,33 +41,6 @@ public class BancoGateway extends UnicastRemoteObject implements BancoGatewayInt
             channel.connect("ChatCluster");
             System.out.println("[GATEWAY] Conectado ao cluster JGroups.");
         } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    @Override
-    public void registrarClienteCallback(ClienteCallback cliente) throws RemoteException {
-        clientesRegistrados.add(cliente);
-        System.out.println("[SERVIDOR] Cliente registrado para atualizações.");
-    }
-
-    @Override
-    public void notificarClientes(String mensagem) throws RemoteException {
-        for (ClienteCallback cliente : clientesRegistrados) {
-            try {
-                cliente.notificarAtualizacao(mensagem);
-            } catch (RemoteException e) {
-                System.out.println("[SERVIDOR] Falha ao notificar um cliente.");
-            }
-        }
-    }
-
-    private void atualizarArquivoJson() {
-        // Lógica para modificar clientes.json
-        try {
-            notificarClientes("Arquivo clientes.json foi atualizado!");
-        } catch (RemoteException e) {
-            System.out.println("[SERVIDOR] Erro ao notificar clientes: " + e.getMessage());
             e.printStackTrace();
         }
     }

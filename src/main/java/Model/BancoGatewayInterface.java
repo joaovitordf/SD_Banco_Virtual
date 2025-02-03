@@ -25,8 +25,4 @@ public interface BancoGatewayInterface extends Remote {
 
     // Método para realizar uma transferência entre contas
     boolean realizarTransferencia(String remetente, String destinatario, BigDecimal valor) throws RemoteException;
-
-    void registrarClienteCallback(ClienteCallback cliente) throws RemoteException;
-
-    void notificarClientes(String mensagem) throws RemoteException;
 }
