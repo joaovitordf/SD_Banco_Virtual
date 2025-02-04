@@ -12,13 +12,13 @@ import org.json.JSONObject;
 
 import java.io.*;
 import java.math.BigDecimal;
+import java.net.*;
+import java.rmi.Naming;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.*;
-import java.net.InetAddress;
-import java.net.NetworkInterface;
 import java.util.Enumeration;
 
 public class Controller implements Receiver, RequestHandler, BancoGatewayInterface {
@@ -29,11 +29,94 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
     private int idConta = 1;
     private Map<String, Conta> clientes = new HashMap<>(); // Mapa para armazenar clientes
     private String caminhoJson = retornaDiretorio("clientes.json");
+    private static final String MULTICAST_IP = "239.255.255.250";
+    private static final int MULTICAST_PORT = 8888;
 
     public static void main(String[] args) {
         try {
-            new Controller().start();
+            MulticastSocket socket = new MulticastSocket(MULTICAST_PORT);
+            InetAddress addr = InetAddress.getByName(MULTICAST_IP);
+            socket.joinGroup(addr);
+
+            // Configura o hostname do RMI para evitar o uso de localhost
+            System.setProperty("java.rmi.server.hostname", getLocalIPAddress());
+            System.out.println("[SERVIDOR] IP do Registry: " + getLocalIPAddress());
+
+            Controller obj = new Controller();
+
+            String rmiAddr = String.format("rmi://%s/testeapresentacao", getLocalIPAddress());
+            try {
+                java.rmi.registry.LocateRegistry.getRegistry(1099);
+                System.out.println("Pegando serviço registry já criado");
+                Naming.rebind(rmiAddr, obj);
+            } catch (Exception e) {
+                System.out.println("Criando registry");
+                java.rmi.registry.LocateRegistry.createRegistry(1099);
+                Naming.bind(rmiAddr, obj);
+            }
+
+            byte[] bufferSend = rmiAddr.getBytes();
+            DatagramPacket stub = new DatagramPacket(bufferSend, bufferSend.length, addr, MULTICAST_PORT);
+
+            // Criação e conexão do servidor
+            Controller controller = new Controller();
+
+            // Loop de escuta para receber pedidos de stub via multicast
+            while (true) {
+                byte[] buffer = new byte[256];
+                DatagramPacket pacote = new DatagramPacket(buffer, buffer.length, addr, MULTICAST_PORT);
+                socket.receive(pacote);
+
+                String msg = new String(pacote.getData(), 0, pacote.getLength());
+                System.out.println("---------------------------------------");
+                System.out.println("Mensagem recebida: " + msg);
+
+                if (msg.equals("rmiclient")) {
+                    System.out.println("Retornando stub: " + rmiAddr);
+                    System.out.println("---------------------------------------");
+                    socket.send(stub);
+                }
+
+                // Conectar ao canal JGroups
+                controller.startJGroups();
+
+                // Registrar o servidor no RMI Registry
+                controller.registerRMI();
+
+                // Aguardar e executar a lógica do servidor
+                controller.eventLoop();
+            }
+        } catch (java.net.NoRouteToHostException e) {
+            System.err.println("Erro de rede: Nenhuma rota para o host de multicast");
+            e.printStackTrace();
         } catch (Exception e) {
+            System.err.println("Erro ao tentar se conectar ao grupo multicast: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private void startJGroups() {
+        try {
+            // Conectar ao canal JGroups e aguardar o estado
+            channel = new JChannel(retornaDiretorio("cast.xml"));
+            channel.setReceiver(this);
+            channel.connect("BancoCluster");
+            channel.getState(null, 10000); // Aguarda até 10 segundos para sincronização de estado
+            System.out.println("[SERVIDOR] Conectado ao canal JGroups.");
+        } catch (Exception e) {
+            System.out.println("[SERVIDOR] Erro ao conectar ao JGroups: " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private void registerRMI() {
+        try {
+            BancoGatewayInterface stub = (BancoGatewayInterface) UnicastRemoteObject.exportObject(this, 0);
+            Registry registry = LocateRegistry.createRegistry(1099);
+            registry.rebind("BancoGateway", stub);
+            System.out.println("[SERVIDOR] Servidor registrado no RMI Registry.");
+        } catch (Exception e) {
+            System.out.println("[SERVIDOR] Erro ao registrar no RMI Registry: " + e.getMessage());
             e.printStackTrace();
         }
     }
@@ -45,27 +128,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         return dirPath + File.separator + "src" + File.separator + "main" + File.separator + "java" + File.separator + document;
     }
 
-    private void start() throws Exception {
-        // Define um hostname acessível para comunicação entre servidores
-        System.setProperty("java.rmi.server.hostname", getLocalIPAddress());
-
-        // Conectar ao canal JGroups
-        channel = new JChannel(retornaDiretorio("cast.xml"));
-        channel.setReceiver(this);
-        channel.connect("BancoCluster");
-        channel.getState(null, 10000);
-
-        // Registrar o servidor no RMI Registry
-        BancoGatewayInterface stub = (BancoGatewayInterface) UnicastRemoteObject.exportObject(this, 0);
-        Registry registry = LocateRegistry.createRegistry(1099);
-        registry.rebind("BancoGateway", stub);
-        System.out.println("[SERVIDOR] Servidor registrado no RMI Registry.");
-
-        eventLoop();
-        channel.close();
-    }
-
-    private String getLocalIPAddress() {
+    private static String getLocalIPAddress() {
         try {
             Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
             while (interfaces.hasMoreElements()) {
@@ -208,7 +271,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                 if (mensagem.startsWith("CONSULTAR_ID_ORIGEM:")) {
                     // Extrai o nome do cliente a ser consultado
                     String nomeCliente = mensagem.substring(20).trim(); // Corrigido para 13 pois "CONSULTAR_ID:" tem 13
-                                                                        // caracteres
+                    // caracteres
 
                     // Consulta os dados do cliente e obtém o ID da conta
                     String respostaConsulta = consultarIdClienteOrigem(nomeCliente);
@@ -221,7 +284,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                 if (mensagem.startsWith("CONSULTAR_ID_DESTINO:")) {
                     // Extrai o nome do cliente a ser consultado
                     String nomeCliente = mensagem.substring(21).trim(); // Corrigido para 13 pois "CONSULTAR_ID:" tem 13
-                                                                        // caracteres
+                    // caracteres
 
                     // Consulta os dados do cliente e obtém o ID da conta
                     String respostaConsulta = consultarIdClienteDestino(nomeCliente);
@@ -634,7 +697,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                             // Se o cliente for encontrado, retorne o ID da conta no formato esperado
                             int idConta = cliente.getInt("id"); // Supondo que o ID está no campo "id"
                             return "[SERVIDOR] Conta encontrada: origem=" + idConta; // Retorna a mensagem com o ID da
-                                                                                     // conta
+                            // conta
                         }
                     }
                 }
@@ -667,7 +730,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                             // Se o cliente for encontrado, retorne o ID da conta no formato esperado
                             int idConta = cliente.getInt("id"); // Supondo que o ID está no campo "id"
                             return "[SERVIDOR] Conta encontrada: destino=" + idConta; // Retorna a mensagem com o ID da
-                                                                                      // conta
+                            // conta
                         }
                     }
                 }
