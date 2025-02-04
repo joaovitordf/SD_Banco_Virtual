@@ -1,19 +1,19 @@
-import Model.Transferencia;
-import Storage.Entities.Conta.Conta;
+import Model.BancoGatewayInterface;
 import org.jgroups.*;
 
 import java.io.BufferedReader;
 import java.io.InputStreamReader;
 import java.math.BigDecimal;
-
+import java.rmi.Naming;
+import java.rmi.RemoteException;
+import java.io.File;
 
 public class Cliente implements Receiver {
     private JChannel channel;
     private boolean clienteLogado = false;
-    private int idContaOrigem = -1;
-    private int idContaDestino = -1;
     private String nomeLogin = "";
     private String senhaLogin = "";
+    private BancoGatewayInterface gateway; // Interface RMI para o gateway
 
     public static void main(String[] args) {
         try {
@@ -25,12 +25,18 @@ public class Cliente implements Receiver {
     }
 
     private void start() throws Exception {
-        channel = new JChannel("D:\\GitProjects\\SD_Banco_Virtual\\src\\main\\java\\cast.xml");
-        //channel = new JChannel();
-        channel.setReceiver(this);
-        channel.connect("ChatCluster");
+        // Conectar ao gateway via RMI
+        // VAI SER NECESSARIO ALTERAR A LINHA ABAIXO PARA MULTIPLOS SERVIDORES!
+        gateway = (BancoGatewayInterface) Naming.lookup("rmi://localhost/BancoGateway");
+        System.out.println("[CLIENTE] Conectado ao gateway via RMI.");
         eventLoop();
-        channel.close();
+    }
+
+    public static String retornaDiretorio(String document) {
+        // Obtém o diretório atual onde o programa está rodando
+        String dirPath = new File("").getAbsolutePath();
+
+        return dirPath + File.separator + "src" + File.separator + "main" + File.separator + "java" + File.separator + document;
     }
 
     private void eventLoop() {
@@ -121,74 +127,67 @@ public class Cliente implements Receiver {
             }
         } catch (Exception e) {
             e.printStackTrace();
-            return;
         }
     }
 
     private void realizarLogin(String nome, String senha) {
         try {
-            // Monta a mensagem de login no formato esperado pelo servidor
-            String mensagemLogin = "LOGIN:" + nome + ":" + senha;
-            Message msg = new ObjectMessage(null, mensagemLogin);
-
-            System.out.println("[CLIENTE] Enviando solicitação de login...");
-            channel.send(msg);
-        } catch (Exception e) {
+            // Realiza o login via RPC
+            clienteLogado = gateway.realizarLogin(nome, senha);
+            if (clienteLogado) {
+                System.out.println("[CLIENTE] Login realizado com sucesso!");
+            } else {
+                System.out.println("[CLIENTE] Falha no login. Nome ou senha incorretos.");
+            }
+        } catch (RemoteException e) {
             e.printStackTrace();
         }
     }
 
     private void enviarCadastroCliente(String nome, String senha) {
         try {
-            Conta conta = new Conta(nome, senha);
-            ObjectMessage msg = new ObjectMessage(null, conta);
-
-            String mensagem = "Cadastrar Cliente: Nome=" + nome + ", Senha=" + senha;
-            System.out.println("[CLIENTE] Dados enviados: " + mensagem);
-
-            // Enviar os dados para o servidor
-            channel.send(msg);
-
-        } catch (Exception e) {
+            // Realiza o cadastro via RPC
+            boolean cadastroSucesso = gateway.cadastrarCliente(nome, senha);
+            if (cadastroSucesso) {
+                System.out.println("[CLIENTE] Cliente cadastrado com sucesso!");
+            } else {
+                System.out.println("[CLIENTE] Falha ao cadastrar cliente. Nome já existe.");
+            }
+        } catch (RemoteException e) {
             e.printStackTrace();
         }
     }
 
     private void enviarConsultaCliente(String nome) {
         try {
-            // Envia o nome do cliente para consulta
-            String mensagemConsulta = "CONSULTAR_SALDO:" + nome;
-            Message msg = new ObjectMessage(null, mensagemConsulta);
-
-            System.out.println("[CLIENTE] Solicitando dados para o cliente: " + nome);
-            channel.send(msg);
-        } catch (Exception e) {
+            // Realiza a consulta via RPC
+            String saldo = gateway.consultarSaldo(nome);
+            System.out.println("[CLIENTE] Saldo do cliente " + nome + ": " + saldo);
+        } catch (RemoteException e) {
             e.printStackTrace();
         }
     }
 
     private void enviarConsultaSomaSaldos() {
         try {
-            // Envia uma solicitação ao servidor para somar os saldos de todos os clientes
-            String mensagemConsulta = "SOMAR_SALDOS"; // Comando para o servidor
-            Message msg = new ObjectMessage(null, mensagemConsulta);
-
-            System.out.println("[CLIENTE] Solicitando soma dos saldos de todos os clientes.");
-            channel.send(msg);
-        } catch (Exception e) {
+            // Realiza a consulta da soma dos saldos via RPC
+            BigDecimal somaSaldos = gateway.somarSaldos();
+            System.out.println("[CLIENTE] Soma dos saldos de todos os clientes: " + somaSaldos);
+        } catch (RemoteException e) {
             e.printStackTrace();
         }
     }
 
     private void enviarRemocaoCliente(String nome) {
         try {
-            // Envia uma solicitação ao servidor para remover o cliente pelo nome
-            String mensagemRemocao = "REMOVER:" + nome;
-            Message msg = new ObjectMessage(null, mensagemRemocao);
-
-            System.out.println("[CLIENTE] Solicitando remoção do cliente: " + nome);
-            channel.send(msg);
-        } catch (Exception e) {
+            // Realiza a remoção via RPC
+            boolean remocaoSucesso = gateway.removerCliente(nome);
+            if (remocaoSucesso) {
+                System.out.println("[CLIENTE] Cliente removido com sucesso!");
+            } else {
+                System.out.println("[CLIENTE] Falha ao remover cliente. Nome não encontrado.");
+            }
+        } catch (RemoteException e) {
             e.printStackTrace();
         }
     }
@@ -199,38 +198,9 @@ public class Cliente implements Receiver {
             // Recebe a resposta do servidor
             Object object = msg.getObject();
 
-            if (object instanceof Boolean) {
-                boolean loginSucesso = (Boolean) object;
-                if (loginSucesso) {
-                    System.out.println("[CLIENTE] Login realizado com sucesso!");
-                    clienteLogado = true;
-                } else {
-                    System.out.println("[CLIENTE] Falha no login. Nome ou senha incorretos.");
-                    clienteLogado = false;
-                }
-            } else if (object instanceof String) {
+            if (object instanceof String) {
                 String mensagem = (String) object;
-                System.out.println(mensagem);
-
-                if (mensagem.startsWith("[SERVIDOR] Conta encontrada:")) {
-                    String[] partes = mensagem.split("="); // Divide a string por "="
-                    if (partes.length == 2) {
-                        try {
-                            int idConta = Integer.parseInt(partes[1].trim());
-                            if (mensagem.contains("origem")) {
-                                idContaOrigem = idConta;
-                                System.out.println("[CLIENTE] ID da conta de origem: " + idContaOrigem);
-                            } else if (mensagem.contains("destino")) {
-                                idContaDestino = idConta;
-                                System.out.println("[CLIENTE] ID da conta de destino: " + idContaDestino);
-                            }
-                        } catch (NumberFormatException e) {
-                            System.out.println("[CLIENTE] Erro ao processar o ID da conta: " + e.getMessage());
-                        }
-                    }
-                } else {
-                    System.out.println("[CLIENTE] Resposta do servidor: " + mensagem);
-                }
+                System.out.println("[CLIENTE] Resposta do servidor: " + mensagem);
             }
         } catch (Exception e) {
             e.printStackTrace();
@@ -239,44 +209,28 @@ public class Cliente implements Receiver {
 
     private void enviarAlteracaoCliente(String nome, String novaSenha) {
         try {
-            // Envia uma solicitação ao servidor para alterar a senha do cliente
-            String mensagemAlteracao = "ALTERAR:" + nome + ":" + novaSenha;
-            Message msg = new ObjectMessage(null, mensagemAlteracao);
-
-            System.out.println("[CLIENTE] Solicitando alteração da senha para o cliente: " + nome);
-            channel.send(msg);
-        } catch (Exception e) {
+            // Realiza a alteração via RPC
+            boolean alteracaoSucesso = gateway.alterarSenha(nome, novaSenha);
+            if (alteracaoSucesso) {
+                System.out.println("[CLIENTE] Senha alterada com sucesso!");
+            } else {
+                System.out.println("[CLIENTE] Falha ao alterar senha. Nome não encontrado.");
+            }
+        } catch (RemoteException e) {
             e.printStackTrace();
         }
     }
 
-    // Método para enviar a solicitação de transferência
     private void enviarTransferencia(String remetente, String destinatario, BigDecimal valor) {
         try {
-            // Enviar solicitação ao servidor para buscar a conta de origem
-            String mensagemOrigem = "CONSULTAR_ID_ORIGEM:" + remetente;
-            Message msgOrigem = new ObjectMessage(null, mensagemOrigem);
-            channel.send(msgOrigem);
-
-            // Enviar solicitação ao servidor para buscar a conta de destino
-            String mensagemDestino = "CONSULTAR_ID_DESTINO:" + destinatario;
-            Message msgDestino = new ObjectMessage(null, mensagemDestino);
-            channel.send(msgDestino);
-
-            Thread.sleep(1000);
-
-            Transferencia transferencia = new Transferencia();
-            transferencia.setIdOrigem(idContaOrigem);
-            transferencia.setIdDestino(idContaDestino);
-            transferencia.setValor(valor);
-
-            // Envia o pedido de transferência para o servidor
-            ObjectMessage msg = new ObjectMessage(null, transferencia);
-
-            System.out.println("[CLIENTE] Solicitando transferência de " + valor + " de " + remetente + " para " + destinatario);
-            channel.send(msg);
-
-        } catch (Exception e) {
+            // Realiza a transferência via RPC
+            boolean transferenciaSucesso = gateway.realizarTransferencia(remetente, destinatario, valor);
+            if (transferenciaSucesso) {
+                System.out.println("[CLIENTE] Transferência realizada com sucesso!");
+            } else {
+                System.out.println("[CLIENTE] Falha ao realizar transferência. Verifique os dados.");
+            }
+        } catch (RemoteException e) {
             e.printStackTrace();
         }
     }
