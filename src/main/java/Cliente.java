@@ -1,6 +1,4 @@
-import Model.Transferencia;
 import Model.BancoGatewayInterface;
-import Storage.Entities.Conta.Conta;
 import org.jgroups.*;
 
 import java.io.BufferedReader;
@@ -8,12 +6,11 @@ import java.io.InputStreamReader;
 import java.math.BigDecimal;
 import java.rmi.Naming;
 import java.rmi.RemoteException;
+import java.io.File;
 
 public class Cliente implements Receiver {
     private JChannel channel;
     private boolean clienteLogado = false;
-    private int idContaOrigem = -1;
-    private int idContaDestino = -1;
     private String nomeLogin = "";
     private String senhaLogin = "";
     private BancoGatewayInterface gateway; // Interface RMI para o gateway
@@ -29,14 +26,22 @@ public class Cliente implements Receiver {
 
     private void start() throws Exception {
         // Conectar ao gateway via RMI
-        gateway = (BancoGatewayInterface) Naming.lookup("rmi://192.168.1.103/BancoGateway");
+        // VAI SER NECESSARIO ALTERAR A LINHA ABAIXO PARA MULTIPLOS SERVIDORES!
+        gateway = (BancoGatewayInterface) Naming.lookup("rmi://localhost/BancoGateway");
         System.out.println("[CLIENTE] Conectado ao gateway via RMI.");
 
-        channel = new JChannel("C:\\Users\\xjoao\\IdeaProjects\\SD_Banco_Virtual\\src\\main\\java\\cast.xml");
+        channel = new JChannel(retornaDiretorio("cast.xml"));
         channel.setReceiver(this);
         channel.connect("ChatCluster");
         eventLoop();
         channel.close();
+    }
+
+    public static String retornaDiretorio(String document) {
+        // Obtém o diretório atual onde o programa está rodando
+        String dirPath = new File("").getAbsolutePath();
+
+        return dirPath + File.separator + "src" + File.separator + "main" + File.separator + "java" + File.separator + document;
     }
 
     private void eventLoop() {
@@ -127,7 +132,6 @@ public class Cliente implements Receiver {
             }
         } catch (Exception e) {
             e.printStackTrace();
-            return;
         }
     }
 

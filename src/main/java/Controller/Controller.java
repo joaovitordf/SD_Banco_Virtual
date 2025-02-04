@@ -1,7 +1,6 @@
 package Controller;
 
 import Model.Transferencia;
-import Model.BancoGateway;
 import Model.BancoGatewayInterface;
 import Storage.Entities.Conta.Conta;
 import org.jgroups.*;
@@ -26,7 +25,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
     final List<String> state = new LinkedList<String>();
     private int idConta = 1;
     private Map<String, Conta> clientes = new HashMap<>(); // Mapa para armazenar clientes
-    private String caminhoJson = "C:\\Users\\xjoao\\IdeaProjects\\SD_Banco_Virtual\\src\\main\\java\\clientes.json";
+    private String caminhoJson = retornaDiretorio("clientes.json");
 
     public static void main(String[] args) {
         try {
@@ -36,9 +35,16 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         }
     }
 
+    public static String retornaDiretorio(String document) {
+        // Obtém o diretório atual onde o programa está rodando
+        String dirPath = new File("").getAbsolutePath();
+
+        return dirPath + File.separator + "src" + File.separator + "main" + File.separator + "java" + File.separator + document;
+    }
+
     private void start() throws Exception {
         // Conectar ao canal JGroups
-        channel = new JChannel("C:\\Users\\xjoao\\IdeaProjects\\SD_Banco_Virtual\\src\\main\\java\\cast.xml");
+        channel = new JChannel(retornaDiretorio("cast.xml"));
         channel.setReceiver(this);
         channel.connect("ChatCluster");
         channel.getState(null, 10000);

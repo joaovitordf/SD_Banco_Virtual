@@ -1,11 +1,8 @@
 package Model;
 
-import Model.Transferencia;
-import Model.BancoGatewayInterface;
 import Storage.Entities.Conta.Conta;
 import org.jgroups.*;
 import org.jgroups.blocks.*;
-import org.jgroups.util.*;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
@@ -17,15 +14,13 @@ import java.util.*;
 
 public class BancoGateway extends UnicastRemoteObject implements BancoGatewayInterface {
     private JChannel channel;
-    private MessageDispatcher despachante;
-    private HashMap<Integer, Conta> contas = new HashMap<>();
     private Map<String, Conta> clientes = new HashMap<>();
-    private String caminhoJson = "C:\\Users\\xjoao\\IdeaProjects\\SD_Banco_Virtual\\src\\main\\java\\clientes.json";
+    private String caminhoJson = retornaDiretorio("clientes.json");
 
     public BancoGateway() throws RemoteException {
         try {
             // Conectar ao canal JGroups
-            channel = new JChannel("C:\\Users\\xjoao\\IdeaProjects\\SD_Banco_Virtual\\src\\main\\java\\cast.xml");
+            channel = new JChannel(retornaDiretorio("cast.xml"));
             channel.setReceiver(new Receiver() {
                 @Override
                 public void receive(Message msg) {
@@ -43,6 +38,13 @@ public class BancoGateway extends UnicastRemoteObject implements BancoGatewayInt
         } catch (Exception e) {
             e.printStackTrace();
         }
+    }
+
+    public static String retornaDiretorio(String document) {
+        // Obtém o diretório atual onde o programa está rodando
+        String dirPath = new File("").getAbsolutePath();
+
+        return dirPath + File.separator + "src" + File.separator + "main" + File.separator + "java" + File.separator + document;
     }
 
     @Override
