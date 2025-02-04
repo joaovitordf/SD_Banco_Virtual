@@ -33,7 +33,7 @@ public class BancoGateway extends UnicastRemoteObject implements BancoGatewayInt
                     System.out.println("[GATEWAY] Nova visão do cluster: " + new_view);
                 }
             });
-            channel.connect("ChatCluster");
+            channel.connect("BancoCluster");
             System.out.println("[GATEWAY] Conectado ao cluster JGroups.");
         } catch (Exception e) {
             e.printStackTrace();

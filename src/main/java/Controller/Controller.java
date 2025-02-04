@@ -17,6 +17,9 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.*;
+import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.util.Enumeration;
 
 public class Controller implements Receiver, RequestHandler, BancoGatewayInterface {
     private JChannel channel;
@@ -43,10 +46,13 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
     }
 
     private void start() throws Exception {
+        // Define um hostname acessível para comunicação entre servidores
+        System.setProperty("java.rmi.server.hostname", getLocalIPAddress());
+
         // Conectar ao canal JGroups
         channel = new JChannel(retornaDiretorio("cast.xml"));
         channel.setReceiver(this);
-        channel.connect("ChatCluster");
+        channel.connect("BancoCluster");
         channel.getState(null, 10000);
 
         // Registrar o servidor no RMI Registry
@@ -57,6 +63,25 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
         eventLoop();
         channel.close();
+    }
+
+    private String getLocalIPAddress() {
+        try {
+            Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
+            while (interfaces.hasMoreElements()) {
+                NetworkInterface networkInterface = interfaces.nextElement();
+                Enumeration<InetAddress> addresses = networkInterface.getInetAddresses();
+                while (addresses.hasMoreElements()) {
+                    InetAddress inetAddress = addresses.nextElement();
+                    if (!inetAddress.isLoopbackAddress() && inetAddress.isSiteLocalAddress()) {
+                        return inetAddress.getHostAddress();
+                    }
+                }
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+        return "127.0.0.1"; // Retorno padrão caso não consiga determinar o IP local
     }
 
     private void eventLoop() throws Exception {
@@ -85,6 +110,10 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         Conta conta = new Conta(nome, senha);
         clientes.put(nome, conta);
         salvarCadastroEmArquivo(nome, senha);
+
+        // Propaga a atualização para os outros servidores
+        propagarAtualizacao("CADASTRO", nome, senha);
+
         return true;
     }
 
@@ -161,8 +190,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                 clientes.put(conta.getNome(), conta); // Associando a conta pelo numero da conta ou outro identificador
 
                 salvarCadastroEmArquivo(conta.getNome(), conta.getSenha());
-            } else if (object instanceof String) {
-                String mensagem = (String) object;
+            } else if (object instanceof String mensagem) {
 
                 if (mensagem.startsWith("LOGIN:")) {
                     // Extrai as credenciais
@@ -263,30 +291,6 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                         System.out.println("[SERVIDOR] Mensagem de alteração mal formatada.");
                     }
                 }
-            } else if (object instanceof Pedido) {
-                Pedido pedido = (Pedido) object; // Converte o objeto para Pedido
-
-                switch (pedido.tipoPedido) {
-                    case Pedido.TIPO_SALDO:
-                        // Recupera a conta do mapa 'contas' usando o numero da conta
-                        Conta conta = contas.get(pedido.numConta);
-                        if (conta == null) {
-                            // Envia mensagem de erro para o cliente
-                            Message respostaSaldo = new ObjectMessage(msg.getSrc(), "Conta não encontrada.");
-                            channel.send(respostaSaldo);
-                        } else {
-                            // Retorna o saldo da conta
-                            Message respostaSaldo = new ObjectMessage(msg.getSrc(), conta.getSaldo());
-                            channel.send(respostaSaldo);
-                        }
-                        break;
-
-                    default:
-                        // Envia mensagem de erro para o cliente caso o tipo de pedido seja inválido
-                        Message respostaInvalid = new ObjectMessage(msg.getSrc(), "Pedido inválido.");
-                        channel.send(respostaInvalid);
-                        break;
-                }
             } else if (object instanceof Transferencia transferencia) {
                 // Obtém as contas de origem e destino
                 Conta contaOrigem = new Conta(transferencia.getIdOrigem(), transferencia);
@@ -338,55 +342,42 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         }
     }
 
-    public void getState(Base64.OutputStream output) throws Exception {
-        synchronized (state) {
-            Util.objectToStream(state, new DataOutputStream(output));
+    @Override
+    public void getState(OutputStream output) throws Exception {
+        synchronized (clientes) {
+            Util.objectToStream(clientes, new DataOutputStream(output));
         }
+        System.out.println("[SERVIDOR] Estado enviado para um novo nó do cluster.");
     }
 
-    public void setState(Base64.InputStream input) throws Exception {
-        List<String> list;
-        list = (List<String>) Util.objectFromStream(new DataInputStream(input));
-        synchronized (state) {
-            state.clear();
-            state.addAll(list);
+    @Override
+    public void setState(InputStream input) throws Exception {
+        Map<String, Conta> estadoRecebido = (Map<String, Conta>) Util.objectFromStream(new DataInputStream(input));
+        synchronized (clientes) {
+            clientes.clear();
+            clientes.putAll(estadoRecebido);
         }
-        System.out.println(list.size() + " messages in chat history):");
-        list.forEach(System.out::println);
+        System.out.println("[SERVIDOR] Estado atualizado a partir do cluster.");
+    }
+
+    private void propagarAtualizacao(String operacao, String nome, String valor) {
+        try {
+            String mensagem = operacao + ":" + nome + ":" + valor;
+            Message msg = new ObjectMessage(null, mensagem); // Envia para todos os nós do cluster
+            channel.send(msg);
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     public void viewAccepted(View new_view) { // exibe alterações na composição do cluster
         System.err.println("\t\t\t\t\t[DEBUG] ** view: " + new_view);
     }
 
-    class Pedido {
-        final static int TIPO_SALDO = 0;
-        final static int TIPO_TRANSFERENCIA = 1;
-
-        int tipoPedido;
-        int numConta;
-
-        float valor;
-        int contaOrigem;
-        int contaDestino;
-    }
-
     @Override
     public Object handle(Message msg) throws Exception {
         Object object = msg.getObject(); // Obtém o objeto enviado pela mensagem
 
-        if (object instanceof Pedido pedido) {
-            switch (pedido.tipoPedido) {
-                case Pedido.TIPO_SALDO:
-                    // Recupera a conta do mapa 'contas' usando o numero da conta
-                    Conta conta = contas.get(pedido.numConta);
-                    if (conta == null) {
-                        return "Conta não encontrada.";
-                    }
-                    // Retorna o saldo da conta
-                    return conta.getSaldo();
-            }
-        }
         if (object instanceof Transferencia transferencia) {
             // Obtém as contas de origem e destino
             Conta contaOrigem = contas.get(transferencia.getIdOrigem());

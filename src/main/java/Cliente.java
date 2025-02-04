@@ -29,12 +29,7 @@ public class Cliente implements Receiver {
         // VAI SER NECESSARIO ALTERAR A LINHA ABAIXO PARA MULTIPLOS SERVIDORES!
         gateway = (BancoGatewayInterface) Naming.lookup("rmi://localhost/BancoGateway");
         System.out.println("[CLIENTE] Conectado ao gateway via RMI.");
-
-        channel = new JChannel(retornaDiretorio("cast.xml"));
-        channel.setReceiver(this);
-        channel.connect("ChatCluster");
         eventLoop();
-        channel.close();
     }
 
     public static String retornaDiretorio(String document) {
