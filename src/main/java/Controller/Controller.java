@@ -137,11 +137,18 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
     @Override
     public boolean removerCliente(String nome) throws RemoteException {
-        boolean sucesso = removerClienteDoArquivo(nome).startsWith("[SERVIDOR] Cliente removido com sucesso!");
+        String resultado = removerClienteDoArquivo(nome);
+        boolean sucesso = resultado.toLowerCase().contains("removido com sucesso");
 
-        if (sucesso && isCoordenador) { // Apenas o coordenador propaga a remoção
-            System.out.println("[SERVIDOR] Propagando remoção do cliente: " + nome);
-            propagarAtualizacao("REMOVER", nome, "");
+        if (sucesso) {
+            System.out.println("[SERVIDOR] Cliente sendo removido: " + nome);
+
+            if (isCoordenador) { // Apenas o coordenador propaga a alteração
+                System.out.println("[SERVIDOR] Propagando remoção do cliente: " + nome);
+                propagarAtualizacao("REMOVER", nome, "");
+            }
+        } else {
+            System.out.println("[SERVIDOR] Falha ao remover o cliente: " + nome + ". Retorno do método: " + resultado);
         }
 
         return sucesso;
@@ -149,15 +156,23 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
     @Override
     public boolean alterarSenha(String nome, String novaSenha) throws RemoteException {
-        boolean sucesso = alterarSenhaCliente(nome, novaSenha).startsWith("[SERVIDOR] Senha alterada com sucesso!");
+        String resultado = alterarSenhaCliente(nome, novaSenha);
+        boolean sucesso = resultado.toLowerCase().contains("alterada com sucesso");
 
-        if (sucesso && isCoordenador) { // Apenas o coordenador propaga a alteração
-            System.out.println("[SERVIDOR] Propagando alteração de senha do cliente: " + nome);
-            propagarAtualizacao("ALTERAR", nome, novaSenha);
+        if (sucesso) {
+            System.out.println("[SERVIDOR] Senha alterada para o cliente: " + nome);
+
+            if (isCoordenador) { // Apenas o coordenador propaga a alteração
+                System.out.println("[SERVIDOR] Propagando alteração de senha do cliente: " + nome);
+                propagarAtualizacao("ALTERAR", nome, novaSenha);
+            }
+        } else {
+            System.out.println("[SERVIDOR] Falha ao alterar senha para o cliente: " + nome + ". Retorno do método: " + resultado);
         }
 
         return sucesso;
     }
+
 
     @Override
     public boolean realizarTransferencia(String remetente, String destinatario, BigDecimal valor)
@@ -275,9 +290,12 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                         break;
 
                     case "ALTERAR":
+                        System.out.println("[SERVIDOR] Recebida solicitação para alterar senha do cliente: " + nomeCliente);
                         if (clienteExistente(nomeCliente)) {
                             String resultadoAlteracao = alterarSenhaCliente(nomeCliente, valor);
-                            System.out.println(resultadoAlteracao);
+
+                            // Salvar no JSON local para garantir persistência
+                            salvarCadastroEmArquivo(nomeCliente, valor);
                         } else {
                             System.out.println("[SERVIDOR] Cliente " + nomeCliente + " não encontrado. Ignorando propagação.");
                         }
