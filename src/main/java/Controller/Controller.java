@@ -137,12 +137,26 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
     @Override
     public boolean removerCliente(String nome) throws RemoteException {
-        return removerClienteDoArquivo(nome).startsWith("[SERVIDOR] Cliente removido com sucesso!");
+        boolean sucesso = removerClienteDoArquivo(nome).startsWith("[SERVIDOR] Cliente removido com sucesso!");
+
+        if (sucesso && isCoordenador) { // Apenas o coordenador propaga a remoção
+            System.out.println("[SERVIDOR] Propagando remoção do cliente: " + nome);
+            propagarAtualizacao("REMOVER", nome, "");
+        }
+
+        return sucesso;
     }
 
     @Override
     public boolean alterarSenha(String nome, String novaSenha) throws RemoteException {
-        return alterarSenhaCliente(nome, novaSenha).startsWith("[SERVIDOR] Senha alterada com sucesso!");
+        boolean sucesso = alterarSenhaCliente(nome, novaSenha).startsWith("[SERVIDOR] Senha alterada com sucesso!");
+
+        if (sucesso && isCoordenador) { // Apenas o coordenador propaga a alteração
+            System.out.println("[SERVIDOR] Propagando alteração de senha do cliente: " + nome);
+            propagarAtualizacao("ALTERAR", nome, novaSenha);
+        }
+
+        return sucesso;
     }
 
     @Override
@@ -170,6 +184,11 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
         atualizarSaldoNoArquivo(contaOrigem);
         atualizarSaldoNoArquivo(contaDestino);
+
+        if (isCoordenador) { // Apenas o coordenador propaga a transferência
+            System.out.println("[SERVIDOR] Propagando transferência de " + valor + " de " + remetente + " para " + destinatario);
+            propagarAtualizacao("TRANSFERIR", remetente, destinatario + ":" + valor);
+        }
 
         return true;
     }
