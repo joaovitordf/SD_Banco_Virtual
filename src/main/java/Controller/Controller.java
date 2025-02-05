@@ -117,8 +117,10 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         clientes.put(nome, conta);
         salvarCadastroEmArquivo(nome, senha);
 
-        // Propaga a atualização para os outros servidores
-        propagarAtualizacao("CADASTRO", nome, senha);
+        if (isCoordenador) { // O coordenador propaga, mas não processa a própria propagação
+            System.out.println("[SERVIDOR] Propagando novo cliente: " + nome);
+            propagarAtualizacao("CADASTRO", nome, senha);
+        }
 
         return true;
     }
@@ -238,18 +240,16 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                     case "CADASTRO":
                         if (!clienteExistente(nomeCliente)) {
                             salvarCadastroEmArquivo(nomeCliente, valor);
-                            propagarAtualizacao("CADASTRO", nomeCliente, valor);
+                            System.out.println("[SERVIDOR] Cliente " + nomeCliente + " cadastrado a partir da propagação.");
                         } else {
-                            System.out.println("[SERVIDOR] Cliente com o nome " + nomeCliente + " já cadastrado. Ignorando propagação.");
+                            System.out.println("[SERVIDOR] Cliente " + nomeCliente + " já cadastrado. Ignorando propagação.");
                         }
                         break;
 
                     case "REMOVER":
                         if (clienteExistente(nomeCliente)) {
                             String resultadoRemocao = removerClienteDoArquivo(nomeCliente);
-                            Message respostaRemocao = new ObjectMessage(msg.getSrc(), resultadoRemocao);
-                            channel.send(respostaRemocao);
-                            propagarAtualizacao("REMOVER", nomeCliente, "");
+                            System.out.println(resultadoRemocao);
                         } else {
                             System.out.println("[SERVIDOR] Cliente " + nomeCliente + " não encontrado. Ignorando propagação.");
                         }
@@ -258,9 +258,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                     case "ALTERAR":
                         if (clienteExistente(nomeCliente)) {
                             String resultadoAlteracao = alterarSenhaCliente(nomeCliente, valor);
-                            Message respostaAlteracao = new ObjectMessage(msg.getSrc(), resultadoAlteracao);
-                            channel.send(respostaAlteracao);
-                            propagarAtualizacao("ALTERAR", nomeCliente, valor);
+                            System.out.println(resultadoAlteracao);
                         } else {
                             System.out.println("[SERVIDOR] Cliente " + nomeCliente + " não encontrado. Ignorando propagação.");
                         }
