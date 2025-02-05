@@ -198,104 +198,61 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                 salvarCadastroEmArquivo(conta.getNome(), conta.getSenha());
             } else if (object instanceof String mensagem) {
 
-                if (mensagem.startsWith("LOGIN:")) {
-                    // Extrai as credenciais
-                    String[] partes = mensagem.split(":");
-                    String nomeCliente = partes[1];
-                    String senhaCliente = partes[2];
+                String[] partes = mensagem.split(":");
+                String operacao = partes[0];
+                String nomeCliente = partes.length > 1 ? partes[1].trim() : "";
+                String valor = partes.length > 2 ? partes[2].trim() : "";
 
-                    boolean loginValido = verificarCredenciais(nomeCliente, senhaCliente);
+                switch (operacao) {
+                    case "LOGIN":
+                        boolean loginValido = verificarCredenciais(nomeCliente, valor);
+                        Message respostaLogin = new ObjectMessage(msg.getSrc(), loginValido);
+                        channel.send(respostaLogin);
+                        break;
 
-                    // Envia a resposta de volta para o cliente
-                    Message resposta = new ObjectMessage(msg.getSrc(), loginValido);
-                    channel.send(resposta);
-                }
+                    case "CONSULTAR_ID_ORIGEM":
+                        String respostaIdOrigem = consultarIdClienteOrigem(nomeCliente);
+                        Message respostaOrigem = new ObjectMessage(msg.getSrc(), respostaIdOrigem);
+                        channel.send(respostaOrigem);
+                        break;
 
-                if (mensagem.startsWith("CONSULTAR_ID_ORIGEM:")) {
-                    // Extrai o nome do cliente a ser consultado
-                    String nomeCliente = mensagem.substring(20).trim(); // Corrigido para 13 pois "CONSULTAR_ID:" tem 13
-                                                                        // caracteres
+                    case "CONSULTAR_ID_DESTINO":
+                        String respostaIdDestino = consultarIdClienteDestino(nomeCliente);
+                        Message respostaDestino = new ObjectMessage(msg.getSrc(), respostaIdDestino);
+                        channel.send(respostaDestino);
+                        break;
 
-                    // Consulta os dados do cliente e obtém o ID da conta
-                    String respostaConsulta = consultarIdClienteOrigem(nomeCliente);
+                    case "CONSULTAR_SALDO":
+                        String respostaSaldo = consultarSaldoClientePorNome(nomeCliente);
+                        Message respostaConsulta = new ObjectMessage(msg.getSrc(), respostaSaldo);
+                        channel.send(respostaConsulta);
+                        break;
 
-                    // Envia a resposta de volta para o cliente
-                    Message resposta = new ObjectMessage(msg.getSrc(), respostaConsulta);
-                    channel.send(resposta);
-                }
+                    case "SOMAR_SALDOS":
+                        System.out.println("[SERVIDOR] Solicitação de soma dos saldos recebida.");
+                        String resultadoSoma = somarSaldosClientes();
+                        Message respostaSoma = new ObjectMessage(msg.getSrc(), resultadoSoma);
+                        channel.send(respostaSoma);
+                        break;
 
-                if (mensagem.startsWith("CONSULTAR_ID_DESTINO:")) {
-                    // Extrai o nome do cliente a ser consultado
-                    String nomeCliente = mensagem.substring(21).trim(); // Corrigido para 13 pois "CONSULTAR_ID:" tem 13
-                                                                        // caracteres
+                    case "CADASTRO":
+                        salvarCadastroEmArquivo(nomeCliente, valor);
+                        break;
 
-                    // Consulta os dados do cliente e obtém o ID da conta
-                    String respostaConsulta = consultarIdClienteDestino(nomeCliente);
+                    case "REMOVER":
+                        String resultadoRemocao = removerClienteDoArquivo(nomeCliente);
+                        Message respostaRemocao = new ObjectMessage(msg.getSrc(), resultadoRemocao);
+                        channel.send(respostaRemocao);
+                        break;
 
-                    // Envia a resposta de volta para o cliente
-                    Message resposta = new ObjectMessage(msg.getSrc(), respostaConsulta);
-                    channel.send(resposta);
-                }
+                    case "ALTERAR":
+                        String resultadoAlteracao = alterarSenhaCliente(nomeCliente, valor);
+                        Message respostaAlteracao = new ObjectMessage(msg.getSrc(), resultadoAlteracao);
+                        channel.send(respostaAlteracao);
+                        break;
 
-                if (mensagem.startsWith("CONSULTAR_SALDO:")) {
-                    // Extrai o saldo do cliente a ser consultado
-                    String nomeCliente = mensagem.substring(16).trim();
-
-                    // Consulta os dados do cliente
-                    String respostaConsulta = consultarSaldoClientePorNome(nomeCliente);
-
-                    // Envia a resposta de volta para o cliente
-                    Message resposta = new ObjectMessage(msg.getSrc(), respostaConsulta);
-                    channel.send(resposta);
-                }
-
-                if (((String) object).startsWith("SOMAR_SALDOS")) {
-                    System.out.println("[SERVIDOR] Solicitação de soma dos saldos recebida.");
-                    String resultado = somarSaldosClientes();
-                    try {
-                        // Enviar o resultado de volta ao cliente
-                        Message resposta = new ObjectMessage(msg.getSrc(), resultado);
-                        channel.send(resposta);
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
-                }
-
-                if (((String) object).startsWith("REMOVER:")) {
-                    String nomeCliente = ((String) object).substring(8).trim(); // Extrai o nome após 'REMOVER:'
-                    System.out.println("[SERVIDOR] Solicitação de remoção para o cliente: " + nomeCliente);
-
-                    String resultado = removerClienteDoArquivo(nomeCliente); // Remove o cliente do JSON
-
-                    try {
-                        // Enviar a resposta ao cliente
-                        Message resposta = new ObjectMessage(msg.getSrc(), resultado);
-                        channel.send(resposta);
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
-                }
-
-                if (((String) object).startsWith("ALTERAR:")) {
-                    String[] partes = ((String) object).split(":");
-                    if (partes.length == 3) {
-                        String nomeCliente = partes[1].trim();
-                        String novaSenha = partes[2].trim();
-
-                        System.out.println("[SERVIDOR] Solicitação de alteração para o cliente: " + nomeCliente);
-
-                        String resultado = alterarSenhaCliente(nomeCliente, novaSenha); // Altera a senha no JSON
-
-                        try {
-                            // Enviar a resposta ao cliente
-                            Message resposta = new ObjectMessage(msg.getSrc(), resultado);
-                            channel.send(resposta);
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                        }
-                    } else {
-                        System.out.println("[SERVIDOR] Mensagem de alteração mal formatada.");
-                    }
+                    default:
+                        System.out.println("[SERVIDOR] Mensagem desconhecida: " + mensagem);
                 }
             } else if (object instanceof Transferencia transferencia) {
                 // Obtém as contas de origem e destino
@@ -368,6 +325,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
     private void propagarAtualizacao(String operacao, String nome, String valor) {
         try {
+            System.out.println("[SERVIDOR] Propagando atualização.");
             String mensagem = operacao + ":" + nome + ":" + valor;
             Message msg = new ObjectMessage(null, mensagem); // Envia para todos os nós do cluster
             channel.send(msg);
