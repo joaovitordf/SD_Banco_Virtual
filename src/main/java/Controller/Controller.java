@@ -237,25 +237,27 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
                     case "CADASTRO":
                         salvarCadastroEmArquivo(nomeCliente, valor);
+                        propagarAtualizacao("CADASTRO", nomeCliente, valor);
                         break;
 
                     case "REMOVER":
                         String resultadoRemocao = removerClienteDoArquivo(nomeCliente);
                         Message respostaRemocao = new ObjectMessage(msg.getSrc(), resultadoRemocao);
                         channel.send(respostaRemocao);
+                        propagarAtualizacao("REMOVER", nomeCliente, "");
                         break;
 
                     case "ALTERAR":
                         String resultadoAlteracao = alterarSenhaCliente(nomeCliente, valor);
                         Message respostaAlteracao = new ObjectMessage(msg.getSrc(), resultadoAlteracao);
                         channel.send(respostaAlteracao);
+                        propagarAtualizacao("ALTERAR", nomeCliente, valor);
                         break;
 
                     default:
                         System.out.println("[SERVIDOR] Mensagem desconhecida: " + mensagem);
                 }
             } else if (object instanceof Transferencia transferencia) {
-                // Obtém as contas de origem e destino
                 Conta contaOrigem = new Conta(transferencia.getIdOrigem(), transferencia);
                 Conta contaDestino = new Conta(transferencia.getIdDestino(), transferencia);
 
@@ -265,35 +267,24 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                 if (saldoOrigem != null && saldoDestino != null) {
                     contaOrigem.setSaldo(saldoOrigem);
                     contaDestino.setSaldo(saldoDestino);
-                    // Verifica se o valor é positivo
                     if (transferencia.getValor().compareTo(BigDecimal.ZERO) <= 0) {
-                        // Envia mensagem de erro para o cliente
-                        Message respostaTransferencia = new ObjectMessage(msg.getSrc(),
-                                "[SERVIDOR] O valor da transferência deve ser positivo.");
+                        Message respostaTransferencia = new ObjectMessage(msg.getSrc(), "[SERVIDOR] O valor da transferência deve ser positivo.");
                         channel.send(respostaTransferencia);
                     } else if (contaOrigem.getSaldo().compareTo(transferencia.getValor()) < 0) {
-                        // Verifica se há saldo suficiente
-                        Message respostaTransferencia = new ObjectMessage(msg.getSrc(),
-                                "[SERVIDOR] Saldo insuficiente na conta de origem.");
+                        Message respostaTransferencia = new ObjectMessage(msg.getSrc(), "[SERVIDOR] Saldo insuficiente na conta de origem.");
                         channel.send(respostaTransferencia);
                     } else {
-                        // Realiza a transferência
                         contaOrigem.setSaldo(contaOrigem.getSaldo().subtract(transferencia.getValor()));
                         contaDestino.setSaldo(contaDestino.getSaldo().add(transferencia.getValor()));
 
-                        // Atualiza o JSON com os novos saldos
                         atualizarSaldoNoArquivo(contaOrigem);
                         atualizarSaldoNoArquivo(contaDestino);
 
-                        // Envia mensagem de sucesso para o cliente
-                        Message respostaTransferencia = new ObjectMessage(msg.getSrc(),
-                                "[SERVIDOR] Transferência concluída com sucesso.");
+                        propagarAtualizacao("TRANSFERIR", transferencia.getIdOrigem() + "", transferencia.getIdDestino() + ":" + transferencia.getValor());
+
+                        Message respostaTransferencia = new ObjectMessage(msg.getSrc(), "[SERVIDOR] Transferência concluída com sucesso.");
                         channel.send(respostaTransferencia);
                     }
-                } else {
-                    // Envia mensagem de erro para o cliente caso a mensagem seja inválida
-                    Message respostaInvalid = new ObjectMessage(msg.getSrc(), "Saldos não encontrados.");
-                    channel.send(respostaInvalid);
                 }
             } else {
                 // Envia mensagem de erro para o cliente caso a mensagem seja inválida
