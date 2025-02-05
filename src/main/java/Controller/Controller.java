@@ -10,6 +10,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 import java.io.*;
 import java.math.BigDecimal;
+import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
@@ -375,6 +376,15 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         }
     }
 
+    public static boolean verificaRegistroRMI(String name) {
+        try {
+            Registry registry = LocateRegistry.getRegistry();
+            return registry.lookup(name) != null;
+        } catch (NotBoundException | RemoteException e) {
+            return false;
+        }
+    }
+
     private void configurarRMI() throws RemoteException {
         if (!isCoordenador) {
             System.out.println("[SERVIDOR] Não sou o coordenador, então não configuro o RMI.");
@@ -407,7 +417,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         System.out.println("[SERVIDOR] Nova visão do cluster: " + newView);
 
         // Identifica o coordenador do cluster
-        Address coordenadorAtual = newView.getMembers().get(0);
+        Address coordenadorAtual = newView.getMembers().getFirst();
 
         if (coordenadorAtual.equals(channel.getAddress())) {
             System.out.println("[SERVIDOR] Este servidor agora é o coordenador.");
@@ -424,10 +434,14 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                     registry = LocateRegistry.createRegistry(1099);
                 }
 
-                // Atualiza o RMI
-                BancoGatewayInterface stub = (BancoGatewayInterface) UnicastRemoteObject.exportObject(this, 0);
-                registry.rebind("BancoGateway", stub);
-                System.out.println("[SERVIDOR] Registro RMI atualizado pelo novo coordenador.");
+                // Verifica se o objeto RMI já foi registrado antes de exportá-lo novamente
+                if (!verificaRegistroRMI("BancoGateway")) {
+                    BancoGatewayInterface stub = (BancoGatewayInterface) UnicastRemoteObject.exportObject(this, 0);
+                    registry.rebind("BancoGateway", stub);
+                    System.out.println("[SERVIDOR] Registro RMI atualizado pelo novo coordenador.");
+                } else {
+                    System.out.println("[SERVIDOR] RMI já registrado. Nenhuma ação necessária.");
+                }
 
             } catch (RemoteException e) {
                 e.printStackTrace();
