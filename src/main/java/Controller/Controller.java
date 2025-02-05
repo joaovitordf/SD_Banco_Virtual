@@ -28,6 +28,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
     private int idConta = 1;
     private Map<String, Conta> clientes = new HashMap<>(); // Mapa para armazenar clientes
     private String caminhoJson = retornaDiretorio("clientes.json");
+    private boolean isCoordenador = false;
 
     public static void main(String[] args) {
         try {
@@ -56,10 +57,8 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         channel.getState(null, 10000);
 
         // Registrar o servidor no RMI Registry
-        BancoGatewayInterface stub = (BancoGatewayInterface) UnicastRemoteObject.exportObject(this, 0);
-        Registry registry = LocateRegistry.createRegistry(1099);
-        registry.rebind("BancoGateway", stub);
-        System.out.println("[SERVIDOR] Servidor registrado no RMI Registry.");
+        configurarRMI();
+        System.out.println("[SERVIDOR] Servidor iniciado com sucesso.");
 
         eventLoop();
         channel.close();
@@ -81,7 +80,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         } catch (Exception e) {
             e.printStackTrace();
         }
-        return "127.0.0.1"; // Retorno padrão caso não consiga determinar o IP local
+        return "127.0.0.1";
     }
 
     private void eventLoop() throws Exception {
@@ -370,42 +369,85 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         }
     }
 
-    /*
-     * @Override
-     * public void viewAccepted(View newView) {
-     * System.out.println("[SERVIDOR] Nova visão: " + newView);
-     * if (newView.getMembers().get(0).equals(channel.getAddress())) {
-     * try {
-     * Registry registry = LocateRegistry.createRegistry(1099);
-     * registry.rebind("BancoGateway", this);
-     * System.out.println("[SERVIDOR] Este servidor agora é o coordenador.");
-     * } catch (RemoteException e) {
-     * e.printStackTrace();
-     * }
-     * }
-     * }
-     * 
-     * private void salvarEstado() {
-     * try (ObjectOutputStream oos = new ObjectOutputStream(new
-     * FileOutputStream("estado_banco.dat"))) {
-     * oos.writeObject(contas);
-     * } catch (IOException e) {
-     * e.printStackTrace();
-     * }
-     * }
-     * 
-     * private void carregarEstado() {
-     * try (ObjectInputStream ois = new ObjectInputStream(new
-     * FileInputStream("estado_banco.dat"))) {
-     * contas = (HashMap<Integer, Conta>) ois.readObject();
-     * } catch (IOException | ClassNotFoundException e) {
-     * System.out.println("[SERVIDOR] Nenhum estado anterior encontrado.");
-     * }
-     * }
-     * 
-     */
-    public void viewAccepted(View new_view) { // exibe alterações na composição do cluster
-        System.err.println("\t\t\t\t\t[DEBUG] ** view: " + new_view);
+    private void configurarRMI() throws RemoteException {
+        if (!isCoordenador) {
+            System.out.println("[SERVIDOR] Não sou o coordenador, então não configuro o RMI.");
+            return;
+        }
+
+        try {
+            Registry registry = LocateRegistry.getRegistry(1099);
+            registry.list(); // Verifica se já existe um registro
+            System.out.println("[SERVIDOR] Conectado ao registro RMI existente.");
+        } catch (RemoteException e) {
+            System.out.println("[SERVIDOR] Nenhum registro RMI encontrado. Criando um novo...");
+            LocateRegistry.createRegistry(1099);
+        }
+
+        try {
+            // Verifica se o objeto já foi exportado
+            UnicastRemoteObject.unexportObject(this, true);
+        } catch (Exception e) {
+            // Ignora a exceção se o objeto ainda não tiver sido exportado
+        }
+
+        BancoGatewayInterface stub = (BancoGatewayInterface) UnicastRemoteObject.exportObject(this, 0);
+        LocateRegistry.getRegistry(1099).rebind("BancoGateway", stub);
+        System.out.println("[SERVIDOR] Servidor registrado no RMI.");
+    }
+
+    @Override
+    public void viewAccepted(View newView) {
+        System.out.println("[SERVIDOR] Nova visão do cluster: " + newView);
+
+        // Identifica o coordenador do cluster
+        Address coordenadorAtual = newView.getMembers().get(0);
+
+        if (coordenadorAtual.equals(channel.getAddress())) {
+            System.out.println("[SERVIDOR] Este servidor agora é o coordenador.");
+
+            try {
+                // Verifica se o RMI já está rodando antes de recriar
+                Registry registry;
+                try {
+                    registry = LocateRegistry.getRegistry(1099);
+                    registry.list(); // Verifica se o registro já está ativo
+                    System.out.println("[SERVIDOR] Registro RMI já existente. Assumindo controle.");
+                } catch (RemoteException e) {
+                    System.out.println("[SERVIDOR] Nenhum registro RMI encontrado. Criando um novo...");
+                    registry = LocateRegistry.createRegistry(1099);
+                }
+
+                // Atualiza o RMI
+                BancoGatewayInterface stub = (BancoGatewayInterface) UnicastRemoteObject.exportObject(this, 0);
+                registry.rebind("BancoGateway", stub);
+                System.out.println("[SERVIDOR] Registro RMI atualizado pelo novo coordenador.");
+
+            } catch (RemoteException e) {
+                e.printStackTrace();
+            }
+
+            this.isCoordenador = true;
+        } else {
+            System.out.println("[SERVIDOR] Coordenador atual: " + coordenadorAtual);
+            this.isCoordenador = false;
+        }
+    }
+
+    private void salvarEstado() {
+        try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream("estado_banco.dat"))) {
+            oos.writeObject(contas);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void carregarEstado() {
+        try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream("estado_banco.dat"))) {
+            contas = (HashMap<Integer, Conta>) ois.readObject();
+        } catch (IOException | ClassNotFoundException e) {
+            System.out.println("[SERVIDOR] Nenhum estado anterior encontrado.");
+        }
     }
 
     @Override
