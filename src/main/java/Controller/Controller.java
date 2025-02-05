@@ -6,10 +6,8 @@ import Storage.Entities.Conta.Conta;
 import org.jgroups.*;
 import org.jgroups.blocks.*;
 import org.jgroups.util.*;
-import org.jgroups.util.Base64;
 import org.json.JSONArray;
 import org.json.JSONObject;
-
 import java.io.*;
 import java.math.BigDecimal;
 import java.rmi.RemoteException;
@@ -17,9 +15,10 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.*;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
-import java.util.Enumeration;
 
 public class Controller implements Receiver, RequestHandler, BancoGatewayInterface {
     private JChannel channel;
@@ -42,7 +41,8 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         // Obtém o diretório atual onde o programa está rodando
         String dirPath = new File("").getAbsolutePath();
 
-        return dirPath + File.separator + "src" + File.separator + "main" + File.separator + "java" + File.separator + document;
+        return dirPath + File.separator + "src" + File.separator + "main" + File.separator + "java" + File.separator
+                + document;
     }
 
     private void start() throws Exception {
@@ -370,6 +370,40 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         }
     }
 
+    /*
+     * @Override
+     * public void viewAccepted(View newView) {
+     * System.out.println("[SERVIDOR] Nova visão: " + newView);
+     * if (newView.getMembers().get(0).equals(channel.getAddress())) {
+     * try {
+     * Registry registry = LocateRegistry.createRegistry(1099);
+     * registry.rebind("BancoGateway", this);
+     * System.out.println("[SERVIDOR] Este servidor agora é o coordenador.");
+     * } catch (RemoteException e) {
+     * e.printStackTrace();
+     * }
+     * }
+     * }
+     * 
+     * private void salvarEstado() {
+     * try (ObjectOutputStream oos = new ObjectOutputStream(new
+     * FileOutputStream("estado_banco.dat"))) {
+     * oos.writeObject(contas);
+     * } catch (IOException e) {
+     * e.printStackTrace();
+     * }
+     * }
+     * 
+     * private void carregarEstado() {
+     * try (ObjectInputStream ois = new ObjectInputStream(new
+     * FileInputStream("estado_banco.dat"))) {
+     * contas = (HashMap<Integer, Conta>) ois.readObject();
+     * } catch (IOException | ClassNotFoundException e) {
+     * System.out.println("[SERVIDOR] Nenhum estado anterior encontrado.");
+     * }
+     * }
+     * 
+     */
     public void viewAccepted(View new_view) { // exibe alterações na composição do cluster
         System.err.println("\t\t\t\t\t[DEBUG] ** view: " + new_view);
     }
