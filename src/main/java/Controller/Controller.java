@@ -236,22 +236,34 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                         break;
 
                     case "CADASTRO":
-                        salvarCadastroEmArquivo(nomeCliente, valor);
-                        propagarAtualizacao("CADASTRO", nomeCliente, valor);
+                        if (!clienteExistente(nomeCliente)) {
+                            salvarCadastroEmArquivo(nomeCliente, valor);
+                            propagarAtualizacao("CADASTRO", nomeCliente, valor);
+                        } else {
+                            System.out.println("[SERVIDOR] Cliente com o nome " + nomeCliente + " já cadastrado. Ignorando propagação.");
+                        }
                         break;
 
                     case "REMOVER":
-                        String resultadoRemocao = removerClienteDoArquivo(nomeCliente);
-                        Message respostaRemocao = new ObjectMessage(msg.getSrc(), resultadoRemocao);
-                        channel.send(respostaRemocao);
-                        propagarAtualizacao("REMOVER", nomeCliente, "");
+                        if (clienteExistente(nomeCliente)) {
+                            String resultadoRemocao = removerClienteDoArquivo(nomeCliente);
+                            Message respostaRemocao = new ObjectMessage(msg.getSrc(), resultadoRemocao);
+                            channel.send(respostaRemocao);
+                            propagarAtualizacao("REMOVER", nomeCliente, "");
+                        } else {
+                            System.out.println("[SERVIDOR] Cliente " + nomeCliente + " não encontrado. Ignorando propagação.");
+                        }
                         break;
 
                     case "ALTERAR":
-                        String resultadoAlteracao = alterarSenhaCliente(nomeCliente, valor);
-                        Message respostaAlteracao = new ObjectMessage(msg.getSrc(), resultadoAlteracao);
-                        channel.send(respostaAlteracao);
-                        propagarAtualizacao("ALTERAR", nomeCliente, valor);
+                        if (clienteExistente(nomeCliente)) {
+                            String resultadoAlteracao = alterarSenhaCliente(nomeCliente, valor);
+                            Message respostaAlteracao = new ObjectMessage(msg.getSrc(), resultadoAlteracao);
+                            channel.send(respostaAlteracao);
+                            propagarAtualizacao("ALTERAR", nomeCliente, valor);
+                        } else {
+                            System.out.println("[SERVIDOR] Cliente " + nomeCliente + " não encontrado. Ignorando propagação.");
+                        }
                         break;
 
                     default:
