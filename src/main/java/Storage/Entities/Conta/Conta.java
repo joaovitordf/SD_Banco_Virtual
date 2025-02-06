@@ -14,6 +14,11 @@ public class Conta implements Serializable {
     private String senha;
     private Transferencia transferencia;
 
+    public Conta(int id, BigDecimal saldo) {
+        this.id = id;
+        this.saldo = saldo;
+    }
+
     public Conta(int id, Transferencia transferencia){
         this.id = id;
         this.transferencia = transferencia;
