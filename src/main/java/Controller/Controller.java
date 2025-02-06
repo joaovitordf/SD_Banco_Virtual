@@ -301,6 +301,24 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                         }
                         break;
 
+                    case "TRANSFERIR":
+                        String[] transferParts = valor.split(":");
+                        if (transferParts.length == 2) {
+                            String destinatario = transferParts[0];
+                            BigDecimal valorTransferencia = new BigDecimal(transferParts[1]);
+
+                            System.out.println("[SERVIDOR] Recebida solicitação para transferir " + valorTransferencia + " de " + nomeCliente + " para " + destinatario);
+                            boolean sucesso = realizarTransferencia(nomeCliente, destinatario, valorTransferencia);
+                            if (sucesso) {
+                                System.out.println("[SERVIDOR] Transferência concluída com sucesso.");
+                            } else {
+                                System.out.println("[SERVIDOR] Falha ao processar a transferência.");
+                            }
+                        } else {
+                            System.out.println("[SERVIDOR] Mensagem de transferência mal formatada: " + mensagem);
+                        }
+                        break;
+
                     default:
                         System.out.println("[SERVIDOR] Mensagem desconhecida: " + mensagem);
                 }
