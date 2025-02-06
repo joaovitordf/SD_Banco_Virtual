@@ -6,20 +6,20 @@ import Storage.Entities.Conta.Conta;
 import org.jgroups.*;
 import org.jgroups.blocks.*;
 import org.jgroups.util.*;
-import org.jgroups.util.Base64;
 import org.json.JSONArray;
 import org.json.JSONObject;
-
 import java.io.*;
 import java.math.BigDecimal;
+import java.rmi.NotBoundException;
 import java.rmi.RemoteException;
 import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.*;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
-import java.util.Enumeration;
 
 public class Controller implements Receiver, RequestHandler, BancoGatewayInterface {
     private JChannel channel;
@@ -29,6 +29,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
     private int idConta = 1;
     private Map<String, Conta> clientes = new HashMap<>(); // Mapa para armazenar clientes
     private String caminhoJson = retornaDiretorio("clientes.json");
+    private boolean isCoordenador = false;
 
     public static void main(String[] args) {
         try {
@@ -42,12 +43,19 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         // Obtém o diretório atual onde o programa está rodando
         String dirPath = new File("").getAbsolutePath();
 
-        return dirPath + File.separator + "src" + File.separator + "main" + File.separator + "java" + File.separator + document;
+        return dirPath + File.separator + "src" + File.separator + "main" + File.separator + "java" + File.separator
+                + document;
     }
 
     private void start() throws Exception {
         // Define um hostname acessível para comunicação entre servidores
         System.setProperty("java.rmi.server.hostname", getLocalIPAddress());
+        String ipLocal = getLocalIPAddress();
+        if (ipLocal != null) {
+            System.setProperty("jgroups.bind_addr", ipLocal);
+        } else {
+            System.out.println("Erro: Não foi possível encontrar um IP válido na rede 192.168.x.x.");
+        }
 
         // Conectar ao canal JGroups
         channel = new JChannel(retornaDiretorio("cast.xml"));
@@ -56,10 +64,8 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         channel.getState(null, 10000);
 
         // Registrar o servidor no RMI Registry
-        BancoGatewayInterface stub = (BancoGatewayInterface) UnicastRemoteObject.exportObject(this, 0);
-        Registry registry = LocateRegistry.createRegistry(1099);
-        registry.rebind("BancoGateway", stub);
-        System.out.println("[SERVIDOR] Servidor registrado no RMI Registry.");
+        configurarRMI();
+        System.out.println("[SERVIDOR] Servidor iniciado com sucesso.");
 
         eventLoop();
         channel.close();
@@ -81,7 +87,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         } catch (Exception e) {
             e.printStackTrace();
         }
-        return "127.0.0.1"; // Retorno padrão caso não consiga determinar o IP local
+        return "127.0.0.1";
     }
 
     private void eventLoop() throws Exception {
@@ -111,8 +117,10 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         clientes.put(nome, conta);
         salvarCadastroEmArquivo(nome, senha);
 
-        // Propaga a atualização para os outros servidores
-        propagarAtualizacao("CADASTRO", nome, senha);
+        if (isCoordenador) { // O coordenador propaga, mas não processa a própria propagação
+            System.out.println("[SERVIDOR] Propagando novo cliente: " + nome);
+            propagarAtualizacao("CADASTRO", nome, senha);
+        }
 
         return true;
     }
@@ -129,13 +137,42 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
     @Override
     public boolean removerCliente(String nome) throws RemoteException {
-        return removerClienteDoArquivo(nome).startsWith("[SERVIDOR] Cliente removido com sucesso!");
+        String resultado = removerClienteDoArquivo(nome);
+        boolean sucesso = resultado.toLowerCase().contains("removido com sucesso");
+
+        if (sucesso) {
+            System.out.println("[SERVIDOR] Cliente sendo removido: " + nome);
+
+            if (isCoordenador) { // Apenas o coordenador propaga a alteração
+                System.out.println("[SERVIDOR] Propagando remoção do cliente: " + nome);
+                propagarAtualizacao("REMOVER", nome, "");
+            }
+        } else {
+            System.out.println("[SERVIDOR] Falha ao remover o cliente: " + nome + ". Retorno do método: " + resultado);
+        }
+
+        return sucesso;
     }
 
     @Override
     public boolean alterarSenha(String nome, String novaSenha) throws RemoteException {
-        return alterarSenhaCliente(nome, novaSenha).startsWith("[SERVIDOR] Senha alterada com sucesso!");
+        String resultado = alterarSenhaCliente(nome, novaSenha);
+        boolean sucesso = resultado.toLowerCase().contains("alterada com sucesso");
+
+        if (sucesso) {
+            System.out.println("[SERVIDOR] Senha alterada para o cliente: " + nome);
+
+            if (isCoordenador) { // Apenas o coordenador propaga a alteração
+                System.out.println("[SERVIDOR] Propagando alteração de senha do cliente: " + nome);
+                propagarAtualizacao("ALTERAR", nome, novaSenha);
+            }
+        } else {
+            System.out.println("[SERVIDOR] Falha ao alterar senha para o cliente: " + nome + ". Retorno do método: " + resultado);
+        }
+
+        return sucesso;
     }
+
 
     @Override
     public boolean realizarTransferencia(String remetente, String destinatario, BigDecimal valor)
@@ -153,18 +190,27 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         BigDecimal saldoDestino = consultarSaldoClientePorId(idDestino);
 
         if (saldoOrigem.compareTo(valor) < 0) {
+            System.out.println("[SERVIDOR] Saldo insuficiente para transferência.");
             return false; // Saldo insuficiente
         }
 
-        // Realiza a transferência
-        Conta contaOrigem = new Conta(idOrigem, remetente, saldoOrigem.subtract(valor));
-        Conta contaDestino = new Conta(idDestino, destinatario, saldoDestino.add(valor));
+        Conta contaOrigem = new Conta(idOrigem, saldoOrigem.subtract(valor));
+        Conta contaDestino = new Conta(idDestino, saldoDestino.add(valor));
 
         atualizarSaldoNoArquivo(contaOrigem);
         atualizarSaldoNoArquivo(contaDestino);
 
+        System.out.println("[SERVIDOR] Transferência concluída.");
+
+        if (isCoordenador) {
+            System.out.println("[SERVIDOR] Propagando transferência de " + valor + " de " + idOrigem + " para " + idDestino);
+            propagarAtualizacao("TRANSFERIR", idOrigem + "", idDestino + ":" + valor);
+        }
+
         return true;
     }
+
+
 
     private int extrairIdConta(String resposta) {
         try {
@@ -192,145 +238,111 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                 salvarCadastroEmArquivo(conta.getNome(), conta.getSenha());
             } else if (object instanceof String mensagem) {
 
-                if (mensagem.startsWith("LOGIN:")) {
-                    // Extrai as credenciais
+                if (!isCoordenador) {
                     String[] partes = mensagem.split(":");
-                    String nomeCliente = partes[1];
-                    String senhaCliente = partes[2];
+                    String operacao = partes[0];
+                    String nomeCliente = partes.length > 1 ? partes[1].trim() : "";
+                    String valor = partes.length > 2 ? partes[2].trim() : "";
 
-                    boolean loginValido = verificarCredenciais(nomeCliente, senhaCliente);
+                    switch (operacao) {
+                        case "LOGIN":
+                            boolean loginValido = verificarCredenciais(nomeCliente, valor);
+                            Message respostaLogin = new ObjectMessage(msg.getSrc(), loginValido);
+                            channel.send(respostaLogin);
+                            break;
 
-                    // Envia a resposta de volta para o cliente
-                    Message resposta = new ObjectMessage(msg.getSrc(), loginValido);
-                    channel.send(resposta);
-                }
+                        case "CONSULTAR_ID_ORIGEM":
+                            String respostaIdOrigem = consultarIdClienteOrigem(nomeCliente);
+                            Message respostaOrigem = new ObjectMessage(msg.getSrc(), respostaIdOrigem);
+                            channel.send(respostaOrigem);
+                            break;
 
-                if (mensagem.startsWith("CONSULTAR_ID_ORIGEM:")) {
-                    // Extrai o nome do cliente a ser consultado
-                    String nomeCliente = mensagem.substring(20).trim(); // Corrigido para 13 pois "CONSULTAR_ID:" tem 13
-                                                                        // caracteres
+                        case "CONSULTAR_ID_DESTINO":
+                            String respostaIdDestino = consultarIdClienteDestino(nomeCliente);
+                            Message respostaDestino = new ObjectMessage(msg.getSrc(), respostaIdDestino);
+                            channel.send(respostaDestino);
+                            break;
 
-                    // Consulta os dados do cliente e obtém o ID da conta
-                    String respostaConsulta = consultarIdClienteOrigem(nomeCliente);
+                        case "CONSULTAR_SALDO":
+                            String respostaSaldo = consultarSaldoClientePorNome(nomeCliente);
+                            Message respostaConsulta = new ObjectMessage(msg.getSrc(), respostaSaldo);
+                            channel.send(respostaConsulta);
+                            break;
 
-                    // Envia a resposta de volta para o cliente
-                    Message resposta = new ObjectMessage(msg.getSrc(), respostaConsulta);
-                    channel.send(resposta);
-                }
+                        case "SOMAR_SALDOS":
+                            System.out.println("[SERVIDOR] Solicitação de soma dos saldos recebida.");
+                            String resultadoSoma = somarSaldosClientes();
+                            Message respostaSoma = new ObjectMessage(msg.getSrc(), resultadoSoma);
+                            channel.send(respostaSoma);
+                            break;
 
-                if (mensagem.startsWith("CONSULTAR_ID_DESTINO:")) {
-                    // Extrai o nome do cliente a ser consultado
-                    String nomeCliente = mensagem.substring(21).trim(); // Corrigido para 13 pois "CONSULTAR_ID:" tem 13
-                                                                        // caracteres
+                        case "CADASTRO":
+                            if (!clienteExistente(nomeCliente)) {
+                                salvarCadastroEmArquivo(nomeCliente, valor);
+                                System.out.println("[SERVIDOR] Cliente " + nomeCliente + " cadastrado a partir da propagação.");
+                            } else {
+                                System.out.println("[SERVIDOR] Cliente " + nomeCliente + " já cadastrado. Ignorando propagação.");
+                            }
+                            break;
 
-                    // Consulta os dados do cliente e obtém o ID da conta
-                    String respostaConsulta = consultarIdClienteDestino(nomeCliente);
+                        case "REMOVER":
+                            if (clienteExistente(nomeCliente)) {
+                                String resultadoRemocao = removerClienteDoArquivo(nomeCliente);
+                                System.out.println(resultadoRemocao);
+                            } else {
+                                System.out.println("[SERVIDOR] Cliente " + nomeCliente + " não encontrado. Ignorando propagação.");
+                            }
+                            break;
 
-                    // Envia a resposta de volta para o cliente
-                    Message resposta = new ObjectMessage(msg.getSrc(), respostaConsulta);
-                    channel.send(resposta);
-                }
+                        case "ALTERAR":
+                            System.out.println("[SERVIDOR] Recebida solicitação para alterar senha do cliente: " + nomeCliente);
+                            if (clienteExistente(nomeCliente)) {
+                                String resultadoAlteracao = alterarSenhaCliente(nomeCliente, valor);
 
-                if (mensagem.startsWith("CONSULTAR_SALDO:")) {
-                    // Extrai o saldo do cliente a ser consultado
-                    String nomeCliente = mensagem.substring(16).trim();
+                                // Salvar no JSON local para garantir persistência
+                                salvarCadastroEmArquivo(nomeCliente, valor);
+                            } else {
+                                System.out.println("[SERVIDOR] Cliente " + nomeCliente + " não encontrado. Ignorando propagação.");
+                            }
+                            break;
 
-                    // Consulta os dados do cliente
-                    String respostaConsulta = consultarSaldoClientePorNome(nomeCliente);
+                        case "TRANSFERIR":
+                            if (partes.length == 4) {
+                                try {
+                                    int idOrigem = Integer.parseInt(partes[1]);
+                                    int idDestino = Integer.parseInt(partes[2]);
+                                    BigDecimal valorTransferencia = new BigDecimal(partes[3]);
 
-                    // Envia a resposta de volta para o cliente
-                    Message resposta = new ObjectMessage(msg.getSrc(), respostaConsulta);
-                    channel.send(resposta);
-                }
+                                    System.out.println("[SERVIDOR] Recebida solicitação para transferir " + valorTransferencia
+                                            + " de " + idOrigem + " para " + idDestino);
 
-                if (((String) object).startsWith("SOMAR_SALDOS")) {
-                    System.out.println("[SERVIDOR] Solicitação de soma dos saldos recebida.");
-                    String resultado = somarSaldosClientes();
-                    try {
-                        // Enviar o resultado de volta ao cliente
-                        Message resposta = new ObjectMessage(msg.getSrc(), resultado);
-                        channel.send(resposta);
-                    } catch (Exception e) {
-                        e.printStackTrace();
+                                    // Verificar se a transferência já foi processada
+                                    BigDecimal saldoAtual = consultarSaldoClientePorId(idOrigem);
+                                    if (saldoAtual.compareTo(valorTransferencia) < 0) {
+                                        System.out.println("[SERVIDOR] Transferência já processada ou saldo insuficiente. Ignorando.");
+                                        break;
+                                    }
+
+                                    // Criar contas e atualizar saldos
+                                    Conta contaOrigem = new Conta(idOrigem, saldoAtual.subtract(valorTransferencia));
+                                    Conta contaDestino = new Conta(idDestino, consultarSaldoClientePorId(idDestino).add(valorTransferencia));
+
+                                    atualizarSaldoNoArquivo(contaOrigem);
+                                    atualizarSaldoNoArquivo(contaDestino);
+
+                                    System.out.println("[SERVIDOR] Transferência processada com sucesso.");
+
+                                } catch (NumberFormatException e) {
+                                    System.out.println("[SERVIDOR] Erro ao converter dados da transferência: " + e.getMessage());
+                                }
+                            } else {
+                                System.out.println("[SERVIDOR] Mensagem de transferência mal formatada: " + mensagem);
+                            }
+                            break;
+
+                        default:
+                            System.out.println("[SERVIDOR] Mensagem desconhecida: " + mensagem);
                     }
-                }
-
-                if (((String) object).startsWith("REMOVER:")) {
-                    String nomeCliente = ((String) object).substring(8).trim(); // Extrai o nome após 'REMOVER:'
-                    System.out.println("[SERVIDOR] Solicitação de remoção para o cliente: " + nomeCliente);
-
-                    String resultado = removerClienteDoArquivo(nomeCliente); // Remove o cliente do JSON
-
-                    try {
-                        // Enviar a resposta ao cliente
-                        Message resposta = new ObjectMessage(msg.getSrc(), resultado);
-                        channel.send(resposta);
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
-                }
-
-                if (((String) object).startsWith("ALTERAR:")) {
-                    String[] partes = ((String) object).split(":");
-                    if (partes.length == 3) {
-                        String nomeCliente = partes[1].trim();
-                        String novaSenha = partes[2].trim();
-
-                        System.out.println("[SERVIDOR] Solicitação de alteração para o cliente: " + nomeCliente);
-
-                        String resultado = alterarSenhaCliente(nomeCliente, novaSenha); // Altera a senha no JSON
-
-                        try {
-                            // Enviar a resposta ao cliente
-                            Message resposta = new ObjectMessage(msg.getSrc(), resultado);
-                            channel.send(resposta);
-                        } catch (Exception e) {
-                            e.printStackTrace();
-                        }
-                    } else {
-                        System.out.println("[SERVIDOR] Mensagem de alteração mal formatada.");
-                    }
-                }
-            } else if (object instanceof Transferencia transferencia) {
-                // Obtém as contas de origem e destino
-                Conta contaOrigem = new Conta(transferencia.getIdOrigem(), transferencia);
-                Conta contaDestino = new Conta(transferencia.getIdDestino(), transferencia);
-
-                BigDecimal saldoOrigem = consultarSaldoClientePorId(transferencia.getIdOrigem());
-                BigDecimal saldoDestino = consultarSaldoClientePorId(transferencia.getIdDestino());
-
-                if (saldoOrigem != null && saldoDestino != null) {
-                    contaOrigem.setSaldo(saldoOrigem);
-                    contaDestino.setSaldo(saldoDestino);
-                    // Verifica se o valor é positivo
-                    if (transferencia.getValor().compareTo(BigDecimal.ZERO) <= 0) {
-                        // Envia mensagem de erro para o cliente
-                        Message respostaTransferencia = new ObjectMessage(msg.getSrc(),
-                                "[SERVIDOR] O valor da transferência deve ser positivo.");
-                        channel.send(respostaTransferencia);
-                    } else if (contaOrigem.getSaldo().compareTo(transferencia.getValor()) < 0) {
-                        // Verifica se há saldo suficiente
-                        Message respostaTransferencia = new ObjectMessage(msg.getSrc(),
-                                "[SERVIDOR] Saldo insuficiente na conta de origem.");
-                        channel.send(respostaTransferencia);
-                    } else {
-                        // Realiza a transferência
-                        contaOrigem.setSaldo(contaOrigem.getSaldo().subtract(transferencia.getValor()));
-                        contaDestino.setSaldo(contaDestino.getSaldo().add(transferencia.getValor()));
-
-                        // Atualiza o JSON com os novos saldos
-                        atualizarSaldoNoArquivo(contaOrigem);
-                        atualizarSaldoNoArquivo(contaDestino);
-
-                        // Envia mensagem de sucesso para o cliente
-                        Message respostaTransferencia = new ObjectMessage(msg.getSrc(),
-                                "[SERVIDOR] Transferência concluída com sucesso.");
-                        channel.send(respostaTransferencia);
-                    }
-                } else {
-                    // Envia mensagem de erro para o cliente caso a mensagem seja inválida
-                    Message respostaInvalid = new ObjectMessage(msg.getSrc(), "Saldos não encontrados.");
-                    channel.send(respostaInvalid);
                 }
             } else {
                 // Envia mensagem de erro para o cliente caso a mensagem seja inválida
@@ -362,6 +374,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
     private void propagarAtualizacao(String operacao, String nome, String valor) {
         try {
+            System.out.println("[SERVIDOR] Propagando atualização.");
             String mensagem = operacao + ":" + nome + ":" + valor;
             Message msg = new ObjectMessage(null, mensagem); // Envia para todos os nós do cluster
             channel.send(msg);
@@ -370,44 +383,105 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         }
     }
 
-    public void viewAccepted(View new_view) { // exibe alterações na composição do cluster
-        System.err.println("\t\t\t\t\t[DEBUG] ** view: " + new_view);
+    public static boolean verificaRegistroRMI(String name) {
+        try {
+            Registry registry = LocateRegistry.getRegistry();
+            return registry.lookup(name) != null;
+        } catch (NotBoundException | RemoteException e) {
+            return false;
+        }
+    }
+
+    private void configurarRMI() throws RemoteException {
+        if (!isCoordenador) {
+            System.out.println("[SERVIDOR] Não sou o coordenador, então não configuro o RMI.");
+            return;
+        }
+
+        try {
+            Registry registry = LocateRegistry.getRegistry(1099);
+            registry.list(); // Verifica se já existe um registro
+            System.out.println("[SERVIDOR] Conectado ao registro RMI existente.");
+        } catch (RemoteException e) {
+            System.out.println("[SERVIDOR] Nenhum registro RMI encontrado. Criando um novo...");
+            LocateRegistry.createRegistry(1099);
+        }
+
+        try {
+            // Verifica se o objeto já foi exportado
+            UnicastRemoteObject.unexportObject(this, true);
+        } catch (Exception e) {
+            // Ignora a exceção se o objeto ainda não tiver sido exportado
+        }
+
+        BancoGatewayInterface stub = (BancoGatewayInterface) UnicastRemoteObject.exportObject(this, 0);
+        LocateRegistry.getRegistry(1099).rebind("BancoGateway", stub);
+        System.out.println("[SERVIDOR] Servidor registrado no RMI.");
+    }
+
+    @Override
+    public void viewAccepted(View newView) {
+        System.out.println("[SERVIDOR] Nova visão do cluster: " + newView);
+
+        // Identifica o coordenador do cluster
+        Address coordenadorAtual = newView.getMembers().getFirst();
+
+        if (coordenadorAtual.equals(channel.getAddress())) {
+            System.out.println("[SERVIDOR] Este servidor agora é o coordenador.");
+
+            try {
+                // Verifica se o RMI já está rodando antes de recriar
+                Registry registry;
+                try {
+                    registry = LocateRegistry.getRegistry(1099);
+                    registry.list(); // Verifica se o registro já está ativo
+                    System.out.println("[SERVIDOR] Registro RMI já existente. Assumindo controle.");
+                } catch (RemoteException e) {
+                    System.out.println("[SERVIDOR] Nenhum registro RMI encontrado. Criando um novo...");
+                    registry = LocateRegistry.createRegistry(1099);
+                }
+
+                // Verifica se o objeto RMI já foi registrado antes de exportá-lo novamente
+                if (!verificaRegistroRMI("BancoGateway")) {
+                    BancoGatewayInterface stub = (BancoGatewayInterface) UnicastRemoteObject.exportObject(this, 0);
+                    registry.rebind("BancoGateway", stub);
+                    System.out.println("[SERVIDOR] Registro RMI atualizado pelo novo coordenador.");
+                } else {
+                    System.out.println("[SERVIDOR] RMI já registrado. Nenhuma ação necessária.");
+                }
+
+            } catch (RemoteException e) {
+                e.printStackTrace();
+            }
+
+            this.isCoordenador = true;
+        } else {
+            System.out.println("[SERVIDOR] Coordenador atual: " + coordenadorAtual);
+            this.isCoordenador = false;
+        }
+    }
+
+    private void salvarEstado() {
+        try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream("estado_banco.dat"))) {
+            oos.writeObject(contas);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void carregarEstado() {
+        try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream("estado_banco.dat"))) {
+            contas = (HashMap<Integer, Conta>) ois.readObject();
+        } catch (IOException | ClassNotFoundException e) {
+            System.out.println("[SERVIDOR] Nenhum estado anterior encontrado.");
+        }
     }
 
     @Override
     public Object handle(Message msg) throws Exception {
-        Object object = msg.getObject(); // Obtém o objeto enviado pela mensagem
+        Object object = msg.getObject();
 
-        if (object instanceof Transferencia transferencia) {
-            // Obtém as contas de origem e destino
-            Conta contaOrigem = contas.get(transferencia.getIdOrigem());
-            Conta contaDestino = contas.get(transferencia.getIdDestino());
-
-            if (contaOrigem == null || contaDestino == null) {
-                return "[SERVIDOR] Conta de origem ou destino não encontrada.";
-            }
-
-            // Verifica se o valor é positivo
-            if (transferencia.getValor().compareTo(BigDecimal.ZERO) <= 0) {
-                return "[SERVIDOR] O valor da transferência deve ser positivo.";
-            }
-
-            // Verifica se há saldo suficiente
-            if (contaOrigem.getSaldo().compareTo(transferencia.getValor()) < 0) {
-                return "[SERVIDOR] Saldo insuficiente na conta de origem.";
-            }
-
-            // Realiza a transferência
-            contaOrigem.setSaldo(contaOrigem.getSaldo().subtract(transferencia.getValor()));
-            contaDestino.setSaldo(contaDestino.getSaldo().add(transferencia.getValor()));
-
-            // Atualiza o JSON com os novos saldos
-            atualizarSaldoNoArquivo(contaOrigem);
-            atualizarSaldoNoArquivo(contaDestino);
-
-            return "[SERVIDOR] Transferência concluída com sucesso.";
-        }
-        return "Mensagem inválida."; // Se o objeto não for do tipo Pedido
+        return "Mensagem inválida.";
     }
 
     private void atualizarSaldoNoArquivo(Conta conta) {
