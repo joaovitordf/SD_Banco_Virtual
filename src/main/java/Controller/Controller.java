@@ -189,24 +189,38 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         BigDecimal saldoOrigem = consultarSaldoClientePorId(idOrigem);
         BigDecimal saldoDestino = consultarSaldoClientePorId(idDestino);
 
+        System.out.println("DEBUG: Antes da transferência");
+        System.out.println("Saldo Origem: " + saldoOrigem);
+        System.out.println("Saldo Destino: " + saldoDestino);
+        System.out.println("Valor Transferência: " + valor);
+
         if (saldoOrigem.compareTo(valor) < 0) {
+            System.out.println("[SERVIDOR] Saldo insuficiente para transferência.");
             return false; // Saldo insuficiente
         }
 
-        // Realiza a transferência
-        Conta contaOrigem = new Conta(idOrigem, remetente, saldoOrigem.subtract(valor));
-        Conta contaDestino = new Conta(idDestino, destinatario, saldoDestino.add(valor));
+        // Realiza a transferência corretamente
+        BigDecimal novoSaldoOrigem = saldoOrigem.subtract(valor);
+        BigDecimal novoSaldoDestino = saldoDestino.add(valor);
+
+        Conta contaOrigem = new Conta(idOrigem, remetente, novoSaldoOrigem);
+        Conta contaDestino = new Conta(idDestino, destinatario, novoSaldoDestino);
 
         atualizarSaldoNoArquivo(contaOrigem);
         atualizarSaldoNoArquivo(contaDestino);
 
-        if (isCoordenador) { // Apenas o coordenador propaga a transferência
+        System.out.println("DEBUG: Após a transferência");
+        System.out.println("Novo Saldo Origem: " + novoSaldoOrigem);
+        System.out.println("Novo Saldo Destino: " + novoSaldoDestino);
+
+        if (isCoordenador) {
             System.out.println("[SERVIDOR] Propagando transferência de " + valor + " de " + remetente + " para " + destinatario);
             propagarAtualizacao("TRANSFERIR", remetente, destinatario + ":" + valor);
         }
 
         return true;
     }
+
 
     private int extrairIdConta(String resposta) {
         try {
@@ -302,17 +316,30 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                         break;
 
                     case "TRANSFERIR":
-                        String[] transferParts = valor.split(":");
-                        if (transferParts.length == 2) {
-                            String destinatario = transferParts[0];
-                            BigDecimal valorTransferencia = new BigDecimal(transferParts[1]);
+                        if (partes.length == 4) {
+                            String remetente = partes[1];
+                            String destinatario = partes[2];
+                            BigDecimal valorTransferencia = new BigDecimal(partes[3]);
 
-                            System.out.println("[SERVIDOR] Recebida solicitação para transferir " + valorTransferencia + " de " + nomeCliente + " para " + destinatario);
-                            boolean sucesso = realizarTransferencia(nomeCliente, destinatario, valorTransferencia);
-                            if (sucesso) {
-                                System.out.println("[SERVIDOR] Transferência concluída com sucesso.");
-                            } else {
-                                System.out.println("[SERVIDOR] Falha ao processar a transferência.");
+                            System.out.println("[SERVIDOR] Recebida solicitação para transferir " + valorTransferencia + " de " + remetente + " para " + destinatario);
+
+                            // Consultar o saldo e converter para BigDecimal
+                            try {
+                                BigDecimal saldoAtual = new BigDecimal(consultarSaldoClientePorNome(remetente).trim());
+
+                                if (saldoAtual.compareTo(valorTransferencia) < 0) {
+                                    System.out.println("[SERVIDOR] Transferência já processada ou saldo insuficiente. Ignorando.");
+                                    break;
+                                }
+
+                                boolean sucesso = realizarTransferencia(remetente, destinatario, valorTransferencia);
+                                if (sucesso) {
+                                    System.out.println("[SERVIDOR] Transferência processada com sucesso.");
+                                } else {
+                                    System.out.println("[SERVIDOR] Falha ao processar a transferência.");
+                                }
+                            } catch (NumberFormatException e) {
+                                System.out.println("[SERVIDOR] Erro ao converter saldo para BigDecimal: " + e.getMessage());
                             }
                         } else {
                             System.out.println("[SERVIDOR] Mensagem de transferência mal formatada: " + mensagem);
