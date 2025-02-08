@@ -2,6 +2,7 @@ package Controller;
 
 import Model.BancoGatewayInterface;
 import Model.Conta;
+import Model.Estado;
 import org.jgroups.*;
 import org.jgroups.blocks.*;
 import org.jgroups.util.*;
@@ -117,7 +118,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
         if (isCoordenador) { // O coordenador propaga, mas não processa a própria propagação
             System.out.println("[SERVIDOR] Propagando novo cliente: " + nome);
-            propagarAtualizacao("CADASTRO", nome, senha);
+            propagarAtualizacao();
         }
 
         return true;
@@ -134,38 +135,26 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
     }
 
     @Override
-    public boolean removerCliente(String nome) throws RemoteException {
-        String resultado = removerClienteDoArquivo(nome);
-        boolean sucesso = resultado.toLowerCase().contains("removido com sucesso");
+    public boolean alterarSenha(String nome, String novaSenha) throws RemoteException {
+        Conta.alterarSenha(clientes, nome, novaSenha);
+        boolean sucesso = clientes.containsKey(nome);
 
-        if (sucesso) {
-            System.out.println("[SERVIDOR] Cliente sendo removido: " + nome);
-
-            if (isCoordenador) { // Apenas o coordenador propaga a alteração
-                System.out.println("[SERVIDOR] Propagando remoção do cliente: " + nome);
-                propagarAtualizacao("REMOVER", nome, "");
-            }
-        } else {
-            System.out.println("[SERVIDOR] Falha ao remover o cliente: " + nome + ". Retorno do método: " + resultado);
+        if (sucesso && isCoordenador) {
+            System.out.println("[SERVIDOR] Propagando alteração de senha do cliente: " + nome);
+            propagarAtualizacao();
         }
 
         return sucesso;
     }
 
     @Override
-    public boolean alterarSenha(String nome, String novaSenha) throws RemoteException {
-        String resultado = alterarSenhaCliente(nome, novaSenha);
-        boolean sucesso = resultado.toLowerCase().contains("alterada com sucesso");
+    public boolean removerCliente(String nome) throws RemoteException {
+        Conta.removerCliente(clientes, nome);
+        boolean sucesso = !clientes.containsKey(nome);
 
-        if (sucesso) {
-            System.out.println("[SERVIDOR] Senha alterada para o cliente: " + nome);
-
-            if (isCoordenador) { // Apenas o coordenador propaga a alteração
-                System.out.println("[SERVIDOR] Propagando alteração de senha do cliente: " + nome);
-                propagarAtualizacao("ALTERAR", nome, novaSenha);
-            }
-        } else {
-            System.out.println("[SERVIDOR] Falha ao alterar senha para o cliente: " + nome + ". Retorno do método: " + resultado);
+        if (sucesso && isCoordenador) {
+            System.out.println("[SERVIDOR] Propagando remoção do cliente: " + nome);
+            propagarAtualizacao();
         }
 
         return sucesso;
@@ -175,37 +164,14 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
     @Override
     public boolean realizarTransferencia(String remetente, String destinatario, BigDecimal valor)
             throws RemoteException {
-        String origem = consultarIdClienteOrigem(remetente);
-        int idOrigem = extrairIdConta(origem);
-        String destino = consultarIdClienteOrigem(destinatario);
-        int idDestino = extrairIdConta(destino);
+        boolean sucesso = Conta.realizarTransferencia(clientes, remetente, destinatario, valor);
 
-        if (idOrigem == -1 || idDestino == -1) {
-            return false; // Conta de origem ou destino não encontrada
+        if (sucesso && isCoordenador) {
+            System.out.println("[SERVIDOR] Propagando transferência de " + valor + " de " + remetente + " para " + destinatario);
+            propagarAtualizacao();
         }
 
-        BigDecimal saldoOrigem = consultarSaldoClientePorId(idOrigem);
-        BigDecimal saldoDestino = consultarSaldoClientePorId(idDestino);
-
-        if (saldoOrigem.compareTo(valor) < 0) {
-            System.out.println("[SERVIDOR] Saldo insuficiente para transferência.");
-            return false; // Saldo insuficiente
-        }
-
-        Conta contaOrigem = new Conta(idOrigem, saldoOrigem.subtract(valor));
-        Conta contaDestino = new Conta(idDestino, saldoDestino.add(valor));
-
-        atualizarSaldoNoArquivo(contaOrigem);
-        atualizarSaldoNoArquivo(contaDestino);
-
-        System.out.println("[SERVIDOR] Transferência concluída.");
-
-        if (isCoordenador) {
-            System.out.println("[SERVIDOR] Propagando transferência de " + valor + " de " + idOrigem + " para " + idDestino);
-            propagarAtualizacao("TRANSFERIR", idOrigem + "", idDestino + ":" + valor);
-        }
-
-        return true;
+        return sucesso;
     }
 
 
@@ -234,6 +200,21 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                 clientes.put(conta.getNome(), conta); // Associando a conta pelo numero da conta ou outro identificador
 
                 salvarCadastroEmArquivo(conta.getNome(), conta.getSenha());
+            } else if (object instanceof Estado estadoRecebido) {
+                System.out.println("[SERVIDOR] Recebido estado atualizado do coordenador.");
+                System.out.println("JSON Recebido: " + estadoRecebido.getClientesJson());
+
+                synchronized (clientes) {
+                    File arquivo = new File(caminhoJson);
+
+                    // Agora grava o JSON corretamente
+                    try (FileWriter writer = new FileWriter(arquivo)) {
+                        writer.write(estadoRecebido.getClientesJson());
+                        writer.flush();
+                    }
+
+                    System.out.println("[SERVIDOR] Arquivo clientes.json atualizado.");
+                }
             } else if (object instanceof String mensagem) {
 
                 if (!isCoordenador) {
@@ -274,70 +255,6 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                             channel.send(respostaSoma);
                             break;
 
-                        case "CADASTRO":
-                            if (!clienteExistente(nomeCliente)) {
-                                salvarCadastroEmArquivo(nomeCliente, valor);
-                                System.out.println("[SERVIDOR] Cliente " + nomeCliente + " cadastrado a partir da propagação.");
-                            } else {
-                                System.out.println("[SERVIDOR] Cliente " + nomeCliente + " já cadastrado. Ignorando propagação.");
-                            }
-                            break;
-
-                        case "REMOVER":
-                            if (clienteExistente(nomeCliente)) {
-                                String resultadoRemocao = removerClienteDoArquivo(nomeCliente);
-                                System.out.println(resultadoRemocao);
-                            } else {
-                                System.out.println("[SERVIDOR] Cliente " + nomeCliente + " não encontrado. Ignorando propagação.");
-                            }
-                            break;
-
-                        case "ALTERAR":
-                            System.out.println("[SERVIDOR] Recebida solicitação para alterar senha do cliente: " + nomeCliente);
-                            if (clienteExistente(nomeCliente)) {
-                                String resultadoAlteracao = alterarSenhaCliente(nomeCliente, valor);
-
-                                // Salvar no JSON local para garantir persistência
-                                salvarCadastroEmArquivo(nomeCliente, valor);
-                            } else {
-                                System.out.println("[SERVIDOR] Cliente " + nomeCliente + " não encontrado. Ignorando propagação.");
-                            }
-                            break;
-
-                        case "TRANSFERIR":
-                            if (partes.length == 4) {
-                                try {
-                                    int idOrigem = Integer.parseInt(partes[1]);
-                                    int idDestino = Integer.parseInt(partes[2]);
-                                    BigDecimal valorTransferencia = new BigDecimal(partes[3]);
-
-                                    System.out.println("[SERVIDOR] Recebida solicitação para transferir " + valorTransferencia
-                                            + " de " + idOrigem + " para " + idDestino);
-
-                                    // Verificar se a transferência já foi processada
-                                    BigDecimal saldoAtual = consultarSaldoClientePorId(idOrigem);
-                                    if (saldoAtual.compareTo(valorTransferencia) < 0) {
-                                        System.out.println("[SERVIDOR] Transferência já processada ou saldo insuficiente. Ignorando.");
-                                        break;
-                                    }
-
-                                    // Criar contas e atualizar saldos
-                                    Conta contaOrigem = new Conta(idOrigem, saldoAtual.subtract(valorTransferencia));
-                                    Conta contaDestino = new Conta(idDestino, consultarSaldoClientePorId(idDestino).add(valorTransferencia));
-
-                                    atualizarSaldoNoArquivo(contaOrigem);
-                                    atualizarSaldoNoArquivo(contaDestino);
-
-                                    System.out.println("[SERVIDOR] Transferência processada com sucesso.");
-
-                                } catch (NumberFormatException e) {
-                                    System.out.println("[SERVIDOR] Erro ao converter dados da transferência: " + e.getMessage());
-                                }
-                            } else {
-                                System.out.println("[SERVIDOR] Mensagem de transferência mal formatada: " + mensagem);
-                            }
-                            break;
-
                         default:
                             System.out.println("[SERVIDOR] Mensagem desconhecida: " + mensagem);
                     }
@@ -352,29 +269,40 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         }
     }
 
+    public Map<String, Conta> getClientes() {
+        return clientes;
+    }
+
     @Override
     public void getState(OutputStream output) throws Exception {
         synchronized (clientes) {
-            Util.objectToStream(clientes, new DataOutputStream(output));
+            Estado estado = new Estado(this);
+            Util.objectToStream(estado, new DataOutputStream(output));
         }
         System.out.println("[SERVIDOR] Estado enviado para um novo nó do cluster.");
     }
 
     @Override
     public void setState(InputStream input) throws Exception {
-        Map<String, Conta> estadoRecebido = (Map<String, Conta>) Util.objectFromStream(new DataInputStream(input));
+        Estado estadoRecebido = (Estado) Util.objectFromStream(new DataInputStream(input));
         synchronized (clientes) {
-            clientes.clear();
-            clientes.putAll(estadoRecebido);
+            File arquivo = new File(caminhoJson);
+
+            // Agora grava corretamente a String JSON no arquivo
+            try (FileWriter writer = new FileWriter(arquivo)) {
+                writer.write(estadoRecebido.getClientesJson());
+                writer.flush();
+            }
+
+            System.out.println("[SERVIDOR] Estado atualizado a partir do cluster e salvo em clientes.json.");
         }
-        System.out.println("[SERVIDOR] Estado atualizado a partir do cluster.");
     }
 
-    private void propagarAtualizacao(String operacao, String nome, String valor) {
+    private void propagarAtualizacao() {
         try {
-            System.out.println("[SERVIDOR] Propagando atualização.");
-            String mensagem = operacao + ":" + nome + ":" + valor;
-            Message msg = new ObjectMessage(null, mensagem); // Envia para todos os nós do cluster
+            System.out.println("[SERVIDOR] Propagando atualização do estado completo.");
+            Estado estado = new Estado(this);
+            Message msg = new ObjectMessage(null, estado); // Envia o objeto Estado para todos os nós
             channel.send(msg);
         } catch (Exception e) {
             e.printStackTrace();
