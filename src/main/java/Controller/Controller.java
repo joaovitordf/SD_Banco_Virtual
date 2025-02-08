@@ -104,7 +104,10 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
     @Override
     public boolean realizarLogin(String nome, String senha) throws RemoteException {
-        return verificarCredenciais(nome, senha);
+        if (clientes.containsKey(nome)) {
+            return Conta.verificarSenha(senha, clientes.get(nome).getSenha());
+        }
+        return false;
     }
 
     @Override
@@ -112,7 +115,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         if (clientes.containsKey(nome)) {
             return false; // Cliente já existe
         }
-        Conta conta = new Conta(nome, senha);
+        Conta conta = new Conta(nome, Conta.criptografarSenha(senha));
         clientes.put(nome, conta);
         salvarCadastroEmArquivo(nome, senha);
 
@@ -136,7 +139,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
     @Override
     public boolean alterarSenha(String nome, String novaSenha) throws RemoteException {
-        Conta.alterarSenha(clientes, nome, novaSenha);
+        Conta.alterarSenha(clientes, nome, Conta.criptografarSenha(novaSenha));
         boolean sucesso = clientes.containsKey(nome);
 
         if (sucesso && isCoordenador) {

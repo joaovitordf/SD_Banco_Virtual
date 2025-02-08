@@ -2,6 +2,9 @@ package Model;
 
 import java.io.Serializable;
 import java.math.BigDecimal;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.Base64;
 import java.util.Map;
 
 public class Conta implements Serializable {
@@ -11,16 +14,10 @@ public class Conta implements Serializable {
     private BigDecimal saldo;
     private String nome;
     private String senha;
-    private Transferencia transferencia;
 
     public Conta(int id, BigDecimal saldo) {
         this.id = id;
         this.saldo = saldo;
-    }
-
-    public Conta(int id, Transferencia transferencia) {
-        this.id = id;
-        this.transferencia = transferencia;
     }
 
     public Conta(String nome, String senha) {
@@ -36,44 +33,18 @@ public class Conta implements Serializable {
         this.saldo = valor;
     }
 
-    public int getId() {
-        return id;
+    public static String criptografarSenha(String senha) {
+        try {
+            MessageDigest md = MessageDigest.getInstance("SHA-256");
+            byte[] hash = md.digest(senha.getBytes());
+            return Base64.getEncoder().encodeToString(hash);
+        } catch (NoSuchAlgorithmException e) {
+            throw new RuntimeException("Erro ao criptografar a senha", e);
+        }
     }
 
-    public void setId(int id) {
-        this.id = id;
-    }
-
-    public String getNome() {
-        return nome;
-    }
-
-    public void setNome(String nome) {
-        this.nome = nome;
-    }
-
-    public String getSenha() {
-        return senha;
-    }
-
-    public void setSenha(String senha) {
-        this.senha = senha;
-    }
-
-    public String getCpf() {
-        return cpf;
-    }
-
-    public void setCpf(String cpf) {
-        this.cpf = cpf;
-    }
-
-    public BigDecimal getSaldo() {
-        return saldo;
-    }
-
-    public void setSaldo(BigDecimal saldo) {
-        this.saldo = saldo;
+    public static boolean verificarSenha(String senhaDigitada, String senhaArmazenada) {
+        return criptografarSenha(senhaDigitada).equals(senhaArmazenada);
     }
 
     public static void alterarSenha(Map<String, Conta> clientes, String nome, String novaSenha) {
@@ -102,5 +73,37 @@ public class Conta implements Serializable {
             System.out.println("[ERRO] Uma das contas informadas não existe.");
         }
         return false;
+    }
+
+    public int getId() {
+        return id;
+    }
+
+    public void setId(int id) {
+        this.id = id;
+    }
+
+    public String getNome() {
+        return nome;
+    }
+
+    public void setNome(String nome) {
+        this.nome = nome;
+    }
+
+    public String getSenha() {
+        return senha;
+    }
+
+    public void setSenha(String senha) {
+        this.senha = senha;
+    }
+
+    public BigDecimal getSaldo() {
+        return saldo;
+    }
+
+    public void setSaldo(BigDecimal saldo) {
+        this.saldo = saldo;
     }
 }
