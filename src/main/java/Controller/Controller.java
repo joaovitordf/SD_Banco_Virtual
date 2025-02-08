@@ -288,24 +288,6 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
     @Override
     public void setState(InputStream input) throws Exception {
         Estado estadoRecebido = (Estado) Util.objectFromStream(new DataInputStream(input));
-        int versaoLocal = Estado.consultarVersao();
-        if (estadoRecebido.getVersao() > versaoLocal) {
-            try {
-                Estado.atualizarVersao();
-            } catch (Exception e) {
-                System.out.println("[SERVIDOR] Erro ao atualizar versão: " + e.getMessage());
-            }
-            synchronized (clientes) {
-                File arquivo = new File(caminhoJson);
-                try (FileWriter writer = new FileWriter(arquivo)) {
-                    writer.write(estadoRecebido.getClientesJson());
-                    writer.flush();
-                }
-                System.out.println("[SERVIDOR] Estado atualizado a partir do cluster e salvo em clientes.json.");
-            }
-        } else {
-            System.out.println("[SERVIDOR] A versão do estado recebido é mais antiga ou igual, ignorando atualização.");
-        }
         synchronized (clientes) {
             File arquivo = new File(caminhoJson);
 
@@ -322,11 +304,6 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
     private void propagarAtualizacao() {
         try {
             System.out.println("[SERVIDOR] Propagando atualização do estado completo.");
-            try {
-                Estado.atualizarVersao();
-            } catch (Exception e) {
-                System.out.println("[SERVIDOR] Erro ao atualizar a versão: " + e.getMessage());
-            }
             Estado estado = new Estado(this);
             Message msg = new ObjectMessage(null, estado); // Envia o objeto Estado para todos os nós
             channel.send(msg);
