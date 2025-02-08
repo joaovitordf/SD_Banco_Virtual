@@ -59,10 +59,8 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         channel = new JChannel(retornaDiretorio("cast.xml"));
         channel.setReceiver(this);
         channel.connect("BancoCluster");
-        despachante = new MessageDispatcher(this.channel, this);
-
-        // Solicita o estado ao cluster
         channel.getState(null, 10000);
+        despachante = new MessageDispatcher(this.channel, this);
 
         // Registrar o servidor no RMI Registry
         configurarRMI();
@@ -392,7 +390,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         try {
             System.out.println("[SERVIDOR] Propagando atualização.");
             String mensagem = operacao + ":" + nome + ":" + valor;
-            Message msg = new ObjectMessage(null, mensagem);
+            Message msg = new ObjectMessage(null, mensagem); // Envia para todos os nós do cluster
             channel.send(msg);
         } catch (Exception e) {
             e.printStackTrace();
