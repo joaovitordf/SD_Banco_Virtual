@@ -1,3 +1,5 @@
+package View;
+
 import Model.BancoGatewayInterface;
 import org.jgroups.*;
 
@@ -6,10 +8,8 @@ import java.io.InputStreamReader;
 import java.math.BigDecimal;
 import java.rmi.Naming;
 import java.rmi.RemoteException;
-import java.io.File;
 
 public class Cliente implements Receiver {
-    private JChannel channel;
     private boolean clienteLogado = false;
     private String nomeLogin = "";
     private String senhaLogin = "";
@@ -27,16 +27,9 @@ public class Cliente implements Receiver {
     private void start() throws Exception {
         // Conectar ao gateway via RMI
         // VAI SER NECESSARIO ALTERAR A LINHA ABAIXO PARA MULTIPLOS SERVIDORES!
-        gateway = (BancoGatewayInterface) Naming.lookup("rmi://localhost/BancoGateway");
+        gateway = (BancoGatewayInterface) Naming.lookup("rmi://192.168.1.102/BancoGateway");
         System.out.println("[CLIENTE] Conectado ao gateway via RMI.");
         eventLoop();
-    }
-
-    public static String retornaDiretorio(String document) {
-        // Obtém o diretório atual onde o programa está rodando
-        String dirPath = new File("").getAbsolutePath();
-
-        return dirPath + File.separator + "src" + File.separator + "main" + File.separator + "java" + File.separator + document;
     }
 
     private void eventLoop() {

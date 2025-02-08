@@ -1,8 +1,7 @@
 package Controller;
 
-import Model.Transferencia;
 import Model.BancoGatewayInterface;
-import Storage.Entities.Conta.Conta;
+import Model.Conta;
 import org.jgroups.*;
 import org.jgroups.blocks.*;
 import org.jgroups.util.*;
@@ -16,8 +15,6 @@ import java.rmi.registry.LocateRegistry;
 import java.rmi.registry.Registry;
 import java.rmi.server.UnicastRemoteObject;
 import java.util.*;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
 
@@ -757,7 +754,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         File arquivo = new File(caminhoJson);
 
         if (!arquivo.exists() || arquivo.length() == 0) {
-            return "[SERVIDOR] Arquivo JSON vazio ou não encontrado.";
+            return "0";
         }
 
         try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
@@ -767,7 +764,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                 sb.append(linha);
             }
 
-            // Converte o conteudo do arquivo em um JSONArray
+            // Converte o conteúdo do arquivo em um JSONArray
             String content = sb.toString().trim();
             if (content.startsWith("[") && content.endsWith("]")) {
                 JSONArray clientesArray = new JSONArray(content);
@@ -780,13 +777,13 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                     }
                 }
 
-                return "[SERVIDOR] A soma dos saldos é: " + somaSaldos;
+                return String.valueOf(somaSaldos); // Retorna apenas o número como string
             } else {
-                return "[SERVIDOR] Formato de arquivo JSON inválido.";
+                return "0"; // Em caso de erro, retorna 0
             }
         } catch (Exception e) {
             e.printStackTrace();
-            return "[SERVIDOR] Erro ao processar a soma dos saldos.";
+            return "0"; // Evita erro ao tentar converter
         }
     }
 

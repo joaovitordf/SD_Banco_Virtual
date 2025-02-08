@@ -1,6 +1,4 @@
-package Storage.Entities.Conta;
-
-import Model.Transferencia;
+package Model;
 
 import java.io.Serializable;
 import java.math.BigDecimal;
