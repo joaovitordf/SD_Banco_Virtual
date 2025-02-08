@@ -49,9 +49,10 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
     private void start() throws Exception {
         // Define um hostname acessível para comunicação entre servidores
-        System.setProperty("java.rmi.server.hostname", getLocalIPAddress());
         String ipLocal = getLocalIPAddress();
+        System.out.println(ipLocal);
         if (ipLocal != null) {
+            System.setProperty("java.rmi.server.hostname", ipLocal);
             System.setProperty("jgroups.bind_addr", ipLocal);
         } else {
             System.out.println("Erro: Não foi possível encontrar um IP válido na rede 192.168.x.x.");
