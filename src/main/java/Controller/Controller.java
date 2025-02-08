@@ -59,6 +59,9 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         channel = new JChannel(retornaDiretorio("cast.xml"));
         channel.setReceiver(this);
         channel.connect("BancoCluster");
+        despachante = new MessageDispatcher(this.channel, this);
+
+        // Solicita o estado ao cluster
         channel.getState(null, 10000);
 
         // Registrar o servidor no RMI Registry
@@ -355,26 +358,41 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
     @Override
     public void getState(OutputStream output) throws Exception {
         synchronized (clientes) {
-            Util.objectToStream(clientes, new DataOutputStream(output));
+            File arquivo = new File(caminhoJson);
+            if (arquivo.exists()) {
+                try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
+                    StringBuilder sb = new StringBuilder();
+                    String linha;
+                    while ((linha = reader.readLine()) != null) {
+                        sb.append(linha);
+                    }
+                    Util.objectToStream(sb.toString(), new DataOutputStream(output));
+                    System.out.println("[SERVIDOR] Estado enviado para um novo nó do cluster.");
+                }
+            } else {
+                System.out.println("[SERVIDOR] Arquivo JSON não encontrado. Enviando estado vazio.");
+                Util.objectToStream("[]", new DataOutputStream(output));
+            }
         }
-        System.out.println("[SERVIDOR] Estado enviado para um novo nó do cluster.");
     }
 
     @Override
     public void setState(InputStream input) throws Exception {
-        Map<String, Conta> estadoRecebido = (Map<String, Conta>) Util.objectFromStream(new DataInputStream(input));
+        String estadoRecebido = (String) Util.objectFromStream(new DataInputStream(input));
         synchronized (clientes) {
-            clientes.clear();
-            clientes.putAll(estadoRecebido);
+            try (FileWriter file = new FileWriter(caminhoJson)) {
+                file.write(estadoRecebido);
+                file.flush();
+            }
+            System.out.println("[SERVIDOR] Estado atualizado a partir do cluster.");
         }
-        System.out.println("[SERVIDOR] Estado atualizado a partir do cluster.");
     }
 
     private void propagarAtualizacao(String operacao, String nome, String valor) {
         try {
             System.out.println("[SERVIDOR] Propagando atualização.");
             String mensagem = operacao + ":" + nome + ":" + valor;
-            Message msg = new ObjectMessage(null, mensagem); // Envia para todos os nós do cluster
+            Message msg = new ObjectMessage(null, mensagem);
             channel.send(msg);
         } catch (Exception e) {
             e.printStackTrace();
@@ -413,7 +431,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         }
 
         BancoGatewayInterface stub = (BancoGatewayInterface) UnicastRemoteObject.exportObject(this, 0);
-        LocateRegistry.getRegistry(1099).rebind("BancoGateway", stub);
+        LocateRegistry.getRegistry(1099).rebind("BancoCluster", stub);
         System.out.println("[SERVIDOR] Servidor registrado no RMI.");
     }
 
@@ -440,9 +458,9 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                 }
 
                 // Verifica se o objeto RMI já foi registrado antes de exportá-lo novamente
-                if (!verificaRegistroRMI("BancoGateway")) {
+                if (!verificaRegistroRMI("BancoCluster")) {
                     BancoGatewayInterface stub = (BancoGatewayInterface) UnicastRemoteObject.exportObject(this, 0);
-                    registry.rebind("BancoGateway", stub);
+                    registry.rebind("BancoCluster", stub);
                     System.out.println("[SERVIDOR] Registro RMI atualizado pelo novo coordenador.");
                 } else {
                     System.out.println("[SERVIDOR] RMI já registrado. Nenhuma ação necessária.");
