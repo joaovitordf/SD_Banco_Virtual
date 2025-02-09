@@ -58,6 +58,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         channel.setReceiver(this);
         channel.connect("BancoCluster");
         channel.getState(null, 10000);
+        System.out.println("[SERVIDOR] Solicitando estado do cluster...");
 
         // Registrar o servidor no RMI Registry
         configurarRMI();
@@ -264,6 +265,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
     public void getState(OutputStream output) throws Exception {
         synchronized (clientes) {
             Estado estado = new Estado(this);
+            System.out.println("[SERVIDOR] Enviando estado: " + estado.getClientesJson());
             Util.objectToStream(estado, new DataOutputStream(output));
         }
         System.out.println("[SERVIDOR] Estado enviado para um novo nó do cluster.");
@@ -272,16 +274,18 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
     @Override
     public void setState(InputStream input) throws Exception {
         Estado estadoRecebido = (Estado) Util.objectFromStream(new DataInputStream(input));
+        System.out.println("[SERVIDOR] Estado recebido do cluster:");
+        System.out.println(estadoRecebido.getClientesJson());
+
         synchronized (clientes) {
             File arquivo = new File(caminhoJson);
 
-            // Agora grava corretamente a String JSON no arquivo
             try (FileWriter writer = new FileWriter(arquivo)) {
                 writer.write(estadoRecebido.getClientesJson());
                 writer.flush();
             }
 
-            System.out.println("[SERVIDOR] Estado atualizado a partir do cluster e salvo em clientes.json.");
+            System.out.println("[SERVIDOR] Estado atualizado e salvo em clientes.json.");
         }
     }
 
