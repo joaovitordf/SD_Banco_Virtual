@@ -44,7 +44,8 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
     private void start() throws Exception {
         // Define um hostname acessível para comunicação entre servidores
-        String ipLocal = "26.180.18.250";
+        String ipLocal = getLocalIPAddress();
+        //String ipLocal = "26.180.18.250";
         System.out.println(ipLocal);
         if (ipLocal != null) {
             System.setProperty("java.rmi.server.hostname", ipLocal);
@@ -150,8 +151,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
     @Override
     public boolean removerCliente(String nome) throws RemoteException {
-        Conta.removerCliente(clientes, nome);
-        boolean sucesso = !clientes.containsKey(nome);
+        boolean sucesso = Conta.removerCliente(nome);
 
         if (sucesso && isCoordenador) {
             System.out.println("[SERVIDOR] Propagando remoção do cliente: " + nome);

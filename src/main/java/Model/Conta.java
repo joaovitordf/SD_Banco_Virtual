@@ -13,7 +13,6 @@ import org.json.JSONObject;
 public class Conta implements Serializable {
     private static int contadorId = 1; // Contador de ID global para incremento automático
     private int id;
-    private String cpf;
     private BigDecimal saldo;
     private String nome;
     private String senha;
@@ -163,8 +162,52 @@ public class Conta implements Serializable {
         }
     }
 
-    public static void removerCliente(Map<String, Conta> clientes, String nome) {
-        clientes.remove(nome);
+    public static boolean removerCliente(String nome) {
+        File arquivo = new File(caminhoJson);
+        if (!arquivo.exists() || arquivo.length() == 0) {
+            System.out.println("[ERRO] Arquivo de clientes não encontrado ou vazio.");
+            return false;
+        }
+
+        try {
+            // Ler o conteúdo do JSON
+            JSONArray clientesArray;
+            try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
+                String content = reader.lines().reduce("", String::concat).trim();
+                clientesArray = new JSONArray(content);
+            }
+
+            // Buscar o índice do cliente a ser removido
+            int indiceParaRemover = -1;
+            for (int i = 0; i < clientesArray.length(); i++) {
+                JSONObject cliente = clientesArray.getJSONObject(i);
+                if (cliente.getString("nome").equals(nome)) {
+                    indiceParaRemover = i;
+                    break;
+                }
+            }
+
+            // Se o cliente não foi encontrado
+            if (indiceParaRemover == -1) {
+                System.out.println("[ERRO] Cliente não encontrado.");
+                return false;
+            }
+
+            // Remover o cliente do array
+            clientesArray.remove(indiceParaRemover);
+
+            // Escrever a atualização no arquivo
+            try (FileWriter writer = new FileWriter(arquivo)) {
+                writer.write(clientesArray.toString(4)); // Formatar JSON com indentação
+            }
+
+            System.out.println("[SERVIDOR] Cliente '" + nome + "' removido com sucesso.");
+            return true;
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
     }
 
     public static boolean realizarTransferencia(String remetente, String destinatario, BigDecimal valor) {
