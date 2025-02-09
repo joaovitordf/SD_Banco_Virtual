@@ -25,19 +25,16 @@ public class Estado implements java.io.Serializable {
     private String lerClientesDoArquivo(String caminho) {
         File arquivo = new File(caminho);
         if (!arquivo.exists()) {
-            System.out.println("[ESTADO] Arquivo " + caminho + " não encontrado. Retornando lista vazia.");
             return "[]";
         }
-
         try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
             StringBuilder sb = new StringBuilder();
             String linha;
             while ((linha = reader.readLine()) != null) {
-                sb.append(linha);
+                sb.append(linha).append("\n");
             }
-            return sb.toString();
+            return sb.toString().trim();
         } catch (IOException e) {
-            System.err.println("[ESTADO] Erro ao ler o arquivo " + caminho + ": " + e.getMessage());
             e.printStackTrace();
             return "[]";
         }
