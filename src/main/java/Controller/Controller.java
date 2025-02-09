@@ -44,7 +44,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
     private void start() throws Exception {
         // Define um hostname acessível para comunicação entre servidores
-        String ipLocal = getLocalIPAddress();
+        String ipLocal = "26.180.18.250";
         System.out.println(ipLocal);
         if (ipLocal != null) {
             System.setProperty("java.rmi.server.hostname", ipLocal);
@@ -115,7 +115,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         }
         Conta conta = new Conta(nome, Conta.criptografarSenha(senha));
         clientes.put(nome, conta);
-        Conta.salvarCadastroEmArquivo(nome, senha);
+        Conta.salvarCadastroEmArquivo(nome, Conta.criptografarSenha(senha));
 
         if (isCoordenador) { // O coordenador propaga, mas não processa a própria propagação
             System.out.println("[SERVIDOR] Propagando novo cliente: " + nome);
@@ -187,7 +187,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                 // Armazenando a conta no mapa de clientes
                 clientes.put(conta.getNome(), conta); // Associando a conta pelo numero da conta ou outro identificador
 
-                Conta.salvarCadastroEmArquivo(conta.getNome(), conta.getSenha());
+                Conta.salvarCadastroEmArquivo(conta.getNome(), Conta.criptografarSenha(conta.getSenha()));
             } else if (object instanceof Estado estadoRecebido) {
                 System.out.println("[SERVIDOR] Recebido estado atualizado do coordenador.");
                 System.out.println("JSON Recebido: " + estadoRecebido.getClientesJson());
