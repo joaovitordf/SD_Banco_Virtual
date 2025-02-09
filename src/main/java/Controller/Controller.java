@@ -2,6 +2,7 @@ package Controller;
 
 import Model.BancoGatewayInterface;
 import Model.Conta;
+import Model.Estado;
 import org.jgroups.*;
 import org.jgroups.blocks.*;
 import org.jgroups.util.*;
@@ -21,9 +22,6 @@ import java.net.NetworkInterface;
 public class Controller implements Receiver, RequestHandler, BancoGatewayInterface {
     private JChannel channel;
     private MessageDispatcher despachante;
-    private HashMap<Integer, Conta> contas = new HashMap<>();
-    final List<String> state = new LinkedList<String>();
-    private int idConta = 1;
     private Map<String, Conta> clientes = new HashMap<>(); // Mapa para armazenar clientes
     private String caminhoJson = retornaDiretorio("clientes.json");
     private boolean isCoordenador = false;
@@ -60,6 +58,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         channel.setReceiver(this);
         channel.connect("BancoCluster");
         channel.getState(null, 10000);
+        System.out.println("[SERVIDOR] Solicitando estado do cluster...");
 
         // Registrar o servidor no RMI Registry
         configurarRMI();
@@ -103,7 +102,10 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
     @Override
     public boolean realizarLogin(String nome, String senha) throws RemoteException {
-        return verificarCredenciais(nome, senha);
+        if (clientes.containsKey(nome)) {
+            return Conta.verificarSenha(senha, clientes.get(nome).getSenha());
+        }
+        return false;
     }
 
     @Override
@@ -111,13 +113,13 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         if (clientes.containsKey(nome)) {
             return false; // Cliente já existe
         }
-        Conta conta = new Conta(nome, senha);
+        Conta conta = new Conta(nome, Conta.criptografarSenha(senha));
         clientes.put(nome, conta);
-        salvarCadastroEmArquivo(nome, senha);
+        Conta.salvarCadastroEmArquivo(nome, senha);
 
         if (isCoordenador) { // O coordenador propaga, mas não processa a própria propagação
             System.out.println("[SERVIDOR] Propagando novo cliente: " + nome);
-            propagarAtualizacao("CADASTRO", nome, senha);
+            propagarAtualizacao();
         }
 
         return true;
@@ -125,7 +127,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
     @Override
     public String consultarSaldo(String nome) throws RemoteException {
-        return consultarSaldoClientePorNome(nome);
+        return Conta.consultarSaldoClientePorNome(nome);
     }
 
     @Override
@@ -134,38 +136,26 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
     }
 
     @Override
-    public boolean removerCliente(String nome) throws RemoteException {
-        String resultado = removerClienteDoArquivo(nome);
-        boolean sucesso = resultado.toLowerCase().contains("removido com sucesso");
+    public boolean alterarSenha(String nome, String novaSenha) throws RemoteException {
+        Conta.alterarSenha(clientes, nome, Conta.criptografarSenha(novaSenha));
+        boolean sucesso = clientes.containsKey(nome);
 
-        if (sucesso) {
-            System.out.println("[SERVIDOR] Cliente sendo removido: " + nome);
-
-            if (isCoordenador) { // Apenas o coordenador propaga a alteração
-                System.out.println("[SERVIDOR] Propagando remoção do cliente: " + nome);
-                propagarAtualizacao("REMOVER", nome, "");
-            }
-        } else {
-            System.out.println("[SERVIDOR] Falha ao remover o cliente: " + nome + ". Retorno do método: " + resultado);
+        if (sucesso && isCoordenador) {
+            System.out.println("[SERVIDOR] Propagando alteração de senha do cliente: " + nome);
+            propagarAtualizacao();
         }
 
         return sucesso;
     }
 
     @Override
-    public boolean alterarSenha(String nome, String novaSenha) throws RemoteException {
-        String resultado = alterarSenhaCliente(nome, novaSenha);
-        boolean sucesso = resultado.toLowerCase().contains("alterada com sucesso");
+    public boolean removerCliente(String nome) throws RemoteException {
+        Conta.removerCliente(clientes, nome);
+        boolean sucesso = !clientes.containsKey(nome);
 
-        if (sucesso) {
-            System.out.println("[SERVIDOR] Senha alterada para o cliente: " + nome);
-
-            if (isCoordenador) { // Apenas o coordenador propaga a alteração
-                System.out.println("[SERVIDOR] Propagando alteração de senha do cliente: " + nome);
-                propagarAtualizacao("ALTERAR", nome, novaSenha);
-            }
-        } else {
-            System.out.println("[SERVIDOR] Falha ao alterar senha para o cliente: " + nome + ". Retorno do método: " + resultado);
+        if (sucesso && isCoordenador) {
+            System.out.println("[SERVIDOR] Propagando remoção do cliente: " + nome);
+            propagarAtualizacao();
         }
 
         return sucesso;
@@ -175,55 +165,19 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
     @Override
     public boolean realizarTransferencia(String remetente, String destinatario, BigDecimal valor)
             throws RemoteException {
-        String origem = consultarIdClienteOrigem(remetente);
-        int idOrigem = extrairIdConta(origem);
-        String destino = consultarIdClienteOrigem(destinatario);
-        int idDestino = extrairIdConta(destino);
+        boolean sucesso = Conta.realizarTransferencia(clientes, remetente, destinatario, valor);
 
-        if (idOrigem == -1 || idDestino == -1) {
-            return false; // Conta de origem ou destino não encontrada
+        if (sucesso && isCoordenador) {
+            System.out.println("[SERVIDOR] Propagando transferência de " + valor + " de " + remetente + " para " + destinatario);
+            propagarAtualizacao();
         }
 
-        BigDecimal saldoOrigem = consultarSaldoClientePorId(idOrigem);
-        BigDecimal saldoDestino = consultarSaldoClientePorId(idDestino);
-
-        if (saldoOrigem.compareTo(valor) < 0) {
-            System.out.println("[SERVIDOR] Saldo insuficiente para transferência.");
-            return false; // Saldo insuficiente
-        }
-
-        Conta contaOrigem = new Conta(idOrigem, saldoOrigem.subtract(valor));
-        Conta contaDestino = new Conta(idDestino, saldoDestino.add(valor));
-
-        atualizarSaldoNoArquivo(contaOrigem);
-        atualizarSaldoNoArquivo(contaDestino);
-
-        System.out.println("[SERVIDOR] Transferência concluída.");
-
-        if (isCoordenador) {
-            System.out.println("[SERVIDOR] Propagando transferência de " + valor + " de " + idOrigem + " para " + idDestino);
-            propagarAtualizacao("TRANSFERIR", idOrigem + "", idDestino + ":" + valor);
-        }
-
-        return true;
-    }
-
-
-
-    private int extrairIdConta(String resposta) {
-        try {
-            // Acha o número no final da string usando regex
-            String numero = resposta.replaceAll("[^0-9]", "");
-            return Integer.parseInt(numero);
-        } catch (NumberFormatException e) {
-            System.out.println("[ERRO] Não foi possível extrair o ID da conta: " + resposta);
-            return -1; // Retorna -1 se houver erro
-        }
+        return sucesso;
     }
 
     public void receive(Message msg) {
         try {
-            Object object = msg.getObject(); // Objeto recebido (Conta)
+            Object object = msg.getObject();
 
             if (object instanceof Conta) {
                 // Desserializando o objeto Conta enviado pelo cliente
@@ -233,7 +187,22 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                 // Armazenando a conta no mapa de clientes
                 clientes.put(conta.getNome(), conta); // Associando a conta pelo numero da conta ou outro identificador
 
-                salvarCadastroEmArquivo(conta.getNome(), conta.getSenha());
+                Conta.salvarCadastroEmArquivo(conta.getNome(), conta.getSenha());
+            } else if (object instanceof Estado estadoRecebido) {
+                System.out.println("[SERVIDOR] Recebido estado atualizado do coordenador.");
+                System.out.println("JSON Recebido: " + estadoRecebido.getClientesJson());
+
+                synchronized (clientes) {
+                    File arquivo = new File(caminhoJson);
+
+                    // Agora grava o JSON corretamente
+                    try (FileWriter writer = new FileWriter(arquivo)) {
+                        writer.write(estadoRecebido.getClientesJson());
+                        writer.flush();
+                    }
+
+                    System.out.println("[SERVIDOR] Arquivo clientes.json atualizado.");
+                }
             } else if (object instanceof String mensagem) {
 
                 if (!isCoordenador) {
@@ -250,19 +219,19 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                             break;
 
                         case "CONSULTAR_ID_ORIGEM":
-                            String respostaIdOrigem = consultarIdClienteOrigem(nomeCliente);
+                            String respostaIdOrigem = Conta.consultarIdClienteOrigem(nomeCliente);
                             Message respostaOrigem = new ObjectMessage(msg.getSrc(), respostaIdOrigem);
                             channel.send(respostaOrigem);
                             break;
 
                         case "CONSULTAR_ID_DESTINO":
-                            String respostaIdDestino = consultarIdClienteDestino(nomeCliente);
+                            String respostaIdDestino = Conta.consultarIdClienteDestino(nomeCliente);
                             Message respostaDestino = new ObjectMessage(msg.getSrc(), respostaIdDestino);
                             channel.send(respostaDestino);
                             break;
 
                         case "CONSULTAR_SALDO":
-                            String respostaSaldo = consultarSaldoClientePorNome(nomeCliente);
+                            String respostaSaldo = Conta.consultarSaldoClientePorNome(nomeCliente);
                             Message respostaConsulta = new ObjectMessage(msg.getSrc(), respostaSaldo);
                             channel.send(respostaConsulta);
                             break;
@@ -272,70 +241,6 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                             String resultadoSoma = somarSaldosClientes();
                             Message respostaSoma = new ObjectMessage(msg.getSrc(), resultadoSoma);
                             channel.send(respostaSoma);
-                            break;
-
-                        case "CADASTRO":
-                            if (!clienteExistente(nomeCliente)) {
-                                salvarCadastroEmArquivo(nomeCliente, valor);
-                                System.out.println("[SERVIDOR] Cliente " + nomeCliente + " cadastrado a partir da propagação.");
-                            } else {
-                                System.out.println("[SERVIDOR] Cliente " + nomeCliente + " já cadastrado. Ignorando propagação.");
-                            }
-                            break;
-
-                        case "REMOVER":
-                            if (clienteExistente(nomeCliente)) {
-                                String resultadoRemocao = removerClienteDoArquivo(nomeCliente);
-                                System.out.println(resultadoRemocao);
-                            } else {
-                                System.out.println("[SERVIDOR] Cliente " + nomeCliente + " não encontrado. Ignorando propagação.");
-                            }
-                            break;
-
-                        case "ALTERAR":
-                            System.out.println("[SERVIDOR] Recebida solicitação para alterar senha do cliente: " + nomeCliente);
-                            if (clienteExistente(nomeCliente)) {
-                                String resultadoAlteracao = alterarSenhaCliente(nomeCliente, valor);
-
-                                // Salvar no JSON local para garantir persistência
-                                salvarCadastroEmArquivo(nomeCliente, valor);
-                            } else {
-                                System.out.println("[SERVIDOR] Cliente " + nomeCliente + " não encontrado. Ignorando propagação.");
-                            }
-                            break;
-
-                        case "TRANSFERIR":
-                            if (partes.length == 4) {
-                                try {
-                                    int idOrigem = Integer.parseInt(partes[1]);
-                                    int idDestino = Integer.parseInt(partes[2]);
-                                    BigDecimal valorTransferencia = new BigDecimal(partes[3]);
-
-                                    System.out.println("[SERVIDOR] Recebida solicitação para transferir " + valorTransferencia
-                                            + " de " + idOrigem + " para " + idDestino);
-
-                                    // Verificar se a transferência já foi processada
-                                    BigDecimal saldoAtual = consultarSaldoClientePorId(idOrigem);
-                                    if (saldoAtual.compareTo(valorTransferencia) < 0) {
-                                        System.out.println("[SERVIDOR] Transferência já processada ou saldo insuficiente. Ignorando.");
-                                        break;
-                                    }
-
-                                    // Criar contas e atualizar saldos
-                                    Conta contaOrigem = new Conta(idOrigem, saldoAtual.subtract(valorTransferencia));
-                                    Conta contaDestino = new Conta(idDestino, consultarSaldoClientePorId(idDestino).add(valorTransferencia));
-
-                                    atualizarSaldoNoArquivo(contaOrigem);
-                                    atualizarSaldoNoArquivo(contaDestino);
-
-                                    System.out.println("[SERVIDOR] Transferência processada com sucesso.");
-
-                                } catch (NumberFormatException e) {
-                                    System.out.println("[SERVIDOR] Erro ao converter dados da transferência: " + e.getMessage());
-                                }
-                            } else {
-                                System.out.println("[SERVIDOR] Mensagem de transferência mal formatada: " + mensagem);
-                            }
                             break;
 
                         default:
@@ -352,29 +257,66 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         }
     }
 
+    public Map<String, Conta> getClientes() {
+        return clientes;
+    }
+
     @Override
     public void getState(OutputStream output) throws Exception {
+        Estado estado;
+
         synchronized (clientes) {
-            Util.objectToStream(clientes, new DataOutputStream(output));
+            estado = new Estado(); // Carrega o estado atualizado do arquivo
         }
-        System.out.println("[SERVIDOR] Estado enviado para um novo nó do cluster.");
+
+        System.out.println("[SERVIDOR] Enviando estado: " + estado.getClientesJson());
+
+        try {
+            Util.objectToStream(estado, new DataOutputStream(output));
+            System.out.println("[SERVIDOR] Estado enviado com sucesso para um novo nó do cluster.");
+        } catch (IOException e) {
+            System.err.println("[ERRO] Falha ao enviar o estado: " + e.getMessage());
+            throw e;
+        }
     }
 
     @Override
     public void setState(InputStream input) throws Exception {
-        Map<String, Conta> estadoRecebido = (Map<String, Conta>) Util.objectFromStream(new DataInputStream(input));
-        synchronized (clientes) {
-            clientes.clear();
-            clientes.putAll(estadoRecebido);
+        Estado estadoRecebido;
+
+        try {
+            estadoRecebido = (Estado) Util.objectFromStream(new DataInputStream(input));
+
+            if (estadoRecebido == null || estadoRecebido.getClientesJson() == null) {
+                throw new IllegalArgumentException("Estado recebido é inválido.");
+            }
+        } catch (Exception e) {
+            System.err.println("[ERRO] Falha ao desserializar o estado recebido: " + e.getMessage());
+            throw e;
         }
-        System.out.println("[SERVIDOR] Estado atualizado a partir do cluster.");
+
+        System.out.println("[SERVIDOR] Estado recebido do cluster:");
+        System.out.println(estadoRecebido.getClientesJson());
+
+        synchronized (clientes) {
+            File arquivo = new File(caminhoJson);
+
+            try (FileWriter writer = new FileWriter(arquivo)) {
+                writer.write(estadoRecebido.getClientesJson());
+                writer.flush();
+                System.out.println("[SERVIDOR] Estado atualizado e salvo em clientes.json.");
+            } catch (IOException e) {
+                System.err.println("[ERRO] Falha ao salvar estado no arquivo: " + e.getMessage());
+                throw e;
+            }
+        }
     }
 
-    private void propagarAtualizacao(String operacao, String nome, String valor) {
+    private void propagarAtualizacao() {
         try {
-            System.out.println("[SERVIDOR] Propagando atualização.");
-            String mensagem = operacao + ":" + nome + ":" + valor;
-            Message msg = new ObjectMessage(null, mensagem); // Envia para todos os nós do cluster
+            System.out.println("[SERVIDOR] Propagando atualização do estado completo.");
+            Estado estado = new Estado();
+            Message msg = new ObjectMessage(null, estado); // Envia o objeto Estado para todos os nós
             channel.send(msg);
         } catch (Exception e) {
             e.printStackTrace();
@@ -459,295 +401,12 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         }
     }
 
-    private void salvarEstado() {
-        try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream("estado_banco.dat"))) {
-            oos.writeObject(contas);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void carregarEstado() {
-        try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream("estado_banco.dat"))) {
-            contas = (HashMap<Integer, Conta>) ois.readObject();
-        } catch (IOException | ClassNotFoundException e) {
-            System.out.println("[SERVIDOR] Nenhum estado anterior encontrado.");
-        }
-    }
 
     @Override
     public Object handle(Message msg) throws Exception {
         Object object = msg.getObject();
 
         return "Mensagem inválida.";
-    }
-
-    private void atualizarSaldoNoArquivo(Conta conta) {
-        File arquivo = new File(caminhoJson);
-
-        if (!arquivo.exists() || arquivo.length() == 0) {
-            System.out.println("[SERVIDOR] Arquivo JSON vazio ou não encontrado.");
-            return;
-        }
-
-        try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-            StringBuilder sb = new StringBuilder();
-            String linha;
-            while ((linha = reader.readLine()) != null) {
-                sb.append(linha);
-            }
-
-            // Converte o conteúdo do arquivo em um JSONArray
-            String content = sb.toString().trim();
-            if (content.startsWith("[") && content.endsWith("]")) {
-                JSONArray clientesArray = new JSONArray(content);
-
-                // Localiza a conta e atualiza o saldo
-                for (int i = 0; i < clientesArray.length(); i++) {
-                    JSONObject cliente = clientesArray.getJSONObject(i);
-                    if (cliente.getInt("id") == conta.getId()) {
-                        cliente.put("saldo", conta.getSaldo());
-                        break;
-                    }
-                }
-
-                // Escreve o array atualizado de volta no arquivo
-                try (FileWriter file = new FileWriter(arquivo)) {
-                    file.write(clientesArray.toString(4));
-                    file.flush();
-                }
-
-                System.out.println("[SERVIDOR] Saldo atualizado no arquivo JSON.");
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void salvarCadastroEmArquivo(String nome, String senha) {
-        try {
-            // Verifica se o nome ja existe no json
-            if (clienteExistente(nome)) {
-                System.out.println("[SERVIDOR] Cliente com o nome " + nome + " já cadastrado.");
-                return; // Não permite cadastrar um novo cliente com o mesmo nome
-            }
-
-            // Caminho do arquivo JSON
-            File arquivo = new File(caminhoJson);
-
-            JSONArray clientesArray = new JSONArray();
-            int maiorId = 0;
-
-            if (arquivo.exists() && arquivo.length() > 0) { // Verifica se o arquivo existe e não esta vazio
-                // Leitura do conteudo atual do arquivo
-                try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-                    StringBuilder sb = new StringBuilder();
-                    String linha;
-                    while ((linha = reader.readLine()) != null) {
-                        sb.append(linha);
-                    }
-
-                    // Tenta converter o conteudo do arquivo em um array JSON
-                    String content = sb.toString().trim();
-                    if (content.startsWith("[") && content.endsWith("]")) {
-                        // Se o conteudo for um array valido, converte
-                        clientesArray = new JSONArray(content);
-                        // Determina o maior id no JSON
-                        for (int i = 0; i < clientesArray.length(); i++) {
-                            JSONObject cliente = clientesArray.getJSONObject(i);
-                            if (cliente.has("id")) {
-                                maiorId = Math.max(maiorId, cliente.getInt("id"));
-                            }
-                        }
-                    } else {
-                        // Se não for um array valido, cria um novo array vazio
-                        clientesArray = new JSONArray();
-                    }
-                }
-            }
-
-            // Incrementa o ID para o próximo cliente
-            idConta = maiorId + 1;
-
-            // Cria um objeto JSON com os dados do cliente
-            JSONObject json = new JSONObject();
-            json.put("id", idConta);
-            json.put("nome", nome);
-            json.put("senha", senha);
-            json.put("saldo", 1000);
-
-            // Adiciona o novo cliente ao array
-            clientesArray.put(json);
-
-            // Escreve o array JSON de volta no arquivo
-            try (FileWriter file = new FileWriter(arquivo)) {
-                file.write(clientesArray.toString(4)); // '4' adiciona identação para melhorar a leitura
-                file.flush();
-            }
-
-            System.out.println("[SERVIDOR] Cadastro de cliente armazenado no arquivo.");
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    // Verifica se o cliente ja existe pelo nome
-    private boolean clienteExistente(String nome) {
-        File arquivo = new File(caminhoJson);
-
-        if (arquivo.exists() && arquivo.length() > 0) {
-            try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-                StringBuilder sb = new StringBuilder();
-                String linha;
-                while ((linha = reader.readLine()) != null) {
-                    sb.append(linha);
-                }
-
-                // Tenta converter o conteudo do arquivo em um array JSON
-                String content = sb.toString().trim();
-                if (content.startsWith("[") && content.endsWith("]")) {
-                    JSONArray clientesArray = new JSONArray(content);
-                    for (int i = 0; i < clientesArray.length(); i++) {
-                        JSONObject cliente = clientesArray.getJSONObject(i);
-                        if (cliente.getString("nome").equals(nome)) {
-                            return true; // Cliente ja existe
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-        return false; // Cliente não encontrado
-    }
-
-    private BigDecimal consultarSaldoClientePorId(int idConta) {
-        File arquivo = new File(caminhoJson);
-
-        if (arquivo.exists() && arquivo.length() > 0) {
-            try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-                StringBuilder sb = new StringBuilder();
-                String linha;
-                while ((linha = reader.readLine()) != null) {
-                    sb.append(linha);
-                }
-
-                // Converte o conteúdo do arquivo em um array JSON
-                String content = sb.toString().trim();
-                if (content.startsWith("[") && content.endsWith("]")) {
-                    JSONArray clientesArray = new JSONArray(content);
-
-                    for (int i = 0; i < clientesArray.length(); i++) {
-                        JSONObject cliente = clientesArray.getJSONObject(i);
-                        if (cliente.getInt("id") == idConta) {
-                            // Retorna o saldo como BigDecimal
-                            return new BigDecimal(cliente.getDouble("saldo"));
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-        // Retorna BigDecimal.ZERO caso o cliente não seja encontrado
-        return BigDecimal.ZERO;
-    }
-
-    private String consultarSaldoClientePorNome(String nome) {
-        File arquivo = new File(caminhoJson);
-
-        if (arquivo.exists() && arquivo.length() > 0) {
-            try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-                StringBuilder sb = new StringBuilder();
-                String linha;
-                while ((linha = reader.readLine()) != null) {
-                    sb.append(linha);
-                }
-
-                // Converte o conteúdo do arquivo em um array JSON
-                String content = sb.toString().trim();
-                if (content.startsWith("[") && content.endsWith("]")) {
-                    JSONArray clientesArray = new JSONArray(content);
-
-                    for (int i = 0; i < clientesArray.length(); i++) {
-                        JSONObject cliente = clientesArray.getJSONObject(i);
-                        if (cliente.getString("nome").equalsIgnoreCase(nome)) {
-                            // Retorna apenas o saldo do cliente
-                            return String.valueOf(cliente.getDouble("saldo")); // Supondo que saldo é um campo numérico
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-        return "[SERVIDOR] Cliente não encontrado.";
-    }
-
-    private String consultarIdClienteOrigem(String nome) {
-        File arquivo = new File(caminhoJson);
-
-        if (arquivo.exists() && arquivo.length() > 0) {
-            try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-                StringBuilder sb = new StringBuilder();
-                String linha;
-                while ((linha = reader.readLine()) != null) {
-                    sb.append(linha);
-                }
-
-                // Converte o conteúdo do arquivo em um array JSON
-                String content = sb.toString().trim();
-                if (content.startsWith("[") && content.endsWith("]")) {
-                    JSONArray clientesArray = new JSONArray(content);
-
-                    for (int i = 0; i < clientesArray.length(); i++) {
-                        JSONObject cliente = clientesArray.getJSONObject(i);
-                        if (cliente.getString("nome").equalsIgnoreCase(nome)) {
-                            // Se o cliente for encontrado, retorne o ID da conta no formato esperado
-                            int idConta = cliente.getInt("id"); // Supondo que o ID está no campo "id"
-                            return "[SERVIDOR] Conta encontrada: origem=" + idConta; // Retorna a mensagem com o ID da
-                                                                                     // conta
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-        return "[SERVIDOR] Cliente não encontrado."; // Caso o cliente não seja encontrado
-    }
-
-    private String consultarIdClienteDestino(String nome) {
-        File arquivo = new File(caminhoJson);
-
-        if (arquivo.exists() && arquivo.length() > 0) {
-            try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-                StringBuilder sb = new StringBuilder();
-                String linha;
-                while ((linha = reader.readLine()) != null) {
-                    sb.append(linha);
-                }
-
-                // Converte o conteúdo do arquivo em um array JSON
-                String content = sb.toString().trim();
-                if (content.startsWith("[") && content.endsWith("]")) {
-                    JSONArray clientesArray = new JSONArray(content);
-
-                    for (int i = 0; i < clientesArray.length(); i++) {
-                        JSONObject cliente = clientesArray.getJSONObject(i);
-                        if (cliente.getString("nome").equalsIgnoreCase(nome)) {
-                            // Se o cliente for encontrado, retorne o ID da conta no formato esperado
-                            int idConta = cliente.getInt("id"); // Supondo que o ID está no campo "id"
-                            return "[SERVIDOR] Conta encontrada: destino=" + idConta; // Retorna a mensagem com o ID da
-                                                                                      // conta
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-        return "[SERVIDOR] Cliente não encontrado."; // Caso o cliente não seja encontrado
     }
 
     private String somarSaldosClientes() {
@@ -777,111 +436,13 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                     }
                 }
 
-                return String.valueOf(somaSaldos); // Retorna apenas o número como string
+                return String.valueOf(somaSaldos);
             } else {
-                return "0"; // Em caso de erro, retorna 0
+                return "0";
             }
         } catch (Exception e) {
             e.printStackTrace();
-            return "0"; // Evita erro ao tentar converter
-        }
-    }
-
-    private String removerClienteDoArquivo(String nome) {
-        File arquivo = new File(caminhoJson);
-
-        if (!arquivo.exists() || arquivo.length() == 0) {
-            return "[SERVIDOR] Arquivo JSON vazio ou não encontrado.";
-        }
-
-        try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-            StringBuilder sb = new StringBuilder();
-            String linha;
-            while ((linha = reader.readLine()) != null) {
-                sb.append(linha);
-            }
-
-            // Converte o conteudo do arquivo em um JSONArray
-            String content = sb.toString().trim();
-            if (content.startsWith("[") && content.endsWith("]")) {
-                JSONArray clientesArray = new JSONArray(content);
-
-                // Percorre o array e remove o cliente com o nome correspondente
-                boolean clienteRemovido = false;
-                for (int i = 0; i < clientesArray.length(); i++) {
-                    JSONObject cliente = clientesArray.getJSONObject(i);
-                    if (cliente.getString("nome").equalsIgnoreCase(nome)) {
-                        clientesArray.remove(i); // Remove o cliente
-                        clienteRemovido = true;
-                        break;
-                    }
-                }
-
-                if (clienteRemovido) {
-                    // Salva o array atualizado de volta no arquivo
-                    try (FileWriter file = new FileWriter(arquivo)) {
-                        file.write(clientesArray.toString(4)); // '4' para identação
-                        file.flush();
-                    }
-                    return "[SERVIDOR] Cliente " + nome + " removido com sucesso.";
-                } else {
-                    return "[SERVIDOR] Cliente " + nome + " não encontrado.";
-                }
-            } else {
-                return "[SERVIDOR] Formato de arquivo JSON inválido.";
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-            return "[SERVIDOR] Erro ao processar a remoção do cliente.";
-        }
-    }
-
-    private String alterarSenhaCliente(String nome, String novaSenha) {
-        File arquivo = new File(caminhoJson);
-
-        if (!arquivo.exists() || arquivo.length() == 0) {
-            return "[SERVIDOR] Arquivo JSON vazio ou não encontrado.";
-        }
-
-        try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-            StringBuilder sb = new StringBuilder();
-            String linha;
-            while ((linha = reader.readLine()) != null) {
-                sb.append(linha);
-            }
-
-            // Converte o conteudo do arquivo em um JSONArray
-            String content = sb.toString().trim();
-            if (content.startsWith("[") && content.endsWith("]")) {
-                JSONArray clientesArray = new JSONArray(content);
-
-                // Percorre o array para localizar o cliente e alterar a senha
-                boolean clienteAlterado = false;
-                for (int i = 0; i < clientesArray.length(); i++) {
-                    JSONObject cliente = clientesArray.getJSONObject(i);
-                    if (cliente.getString("nome").equalsIgnoreCase(nome)) {
-                        cliente.put("senha", novaSenha); // Atualiza a senha
-                        clienteAlterado = true;
-                        break;
-                    }
-                }
-
-                if (clienteAlterado) {
-                    // Salva o array atualizado de volta no arquivo
-                    try (FileWriter file = new FileWriter(arquivo)) {
-                        file.write(clientesArray.toString(4));
-                        file.flush();
-                    }
-                    return "[SERVIDOR] Senha do cliente " + nome + " alterada com sucesso.";
-                } else {
-                    return "[SERVIDOR] Cliente " + nome + " não encontrado.";
-                }
-            } else {
-                return "[SERVIDOR] Formato de arquivo JSON inválido.";
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-            return "[SERVIDOR] Erro ao processar a alteração da senha.";
+            return "0";
         }
     }
 

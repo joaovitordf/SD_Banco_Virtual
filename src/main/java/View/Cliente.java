@@ -26,7 +26,6 @@ public class Cliente implements Receiver {
 
     private void start() throws Exception {
         // Conectar ao gateway via RMI
-        // VAI SER NECESSARIO ALTERAR A LINHA ABAIXO PARA MULTIPLOS SERVIDORES!
         gateway = (BancoGatewayInterface) Naming.lookup("rmi://192.168.1.102/BancoGateway");
         System.out.println("[CLIENTE] Conectado ao gateway via RMI.");
         eventLoop();
@@ -36,86 +35,72 @@ public class Cliente implements Receiver {
         BufferedReader in = new BufferedReader(new InputStreamReader(System.in));
         try {
             while (!clienteLogado) {
+                System.out.println("Escolha uma opção:");
+                System.out.println("0) Sair");
+                System.out.println("1) Cadastro");
+                System.out.println("2) Login");
+
+                String escolha = in.readLine().toLowerCase();
+                if (escolha.equals("0")) {
+                    System.out.println("[CLIENTE] Encerrando aplicação.");
+                    return;
+                }
+
                 System.out.println("Digite seu nome:");
                 nomeLogin = in.readLine().toLowerCase();
 
                 System.out.println("Digite sua senha:");
                 senhaLogin = in.readLine().toLowerCase();
-                realizarLogin(nomeLogin, senhaLogin);
 
-                Thread.sleep(1000);
-
-                if (!clienteLogado) {
-                    System.out.println("[CLIENTE] Deseja cadastrar um novo usuário com os dados informados? (s/n)");
-                    String resposta = in.readLine().toLowerCase();
-                    if (resposta.equals("s")) {
-                        enviarCadastroCliente(nomeLogin, senhaLogin);
-                    }
+                if (escolha.equals("1")) {
+                    enviarCadastroCliente(nomeLogin, senhaLogin);
+                } else if (escolha.equals("2")) {
+                    realizarLogin(nomeLogin, senhaLogin);
+                } else {
+                    System.out.println("[CLIENTE] Escolha inválida.");
                 }
             }
 
-            while (true) {
-                if (clienteLogado) {
-                    System.out.println(
-                            "Digite 'cadastrar', 'alterar', 'remover', 'consultar', 'somarsaldos', 'transferir' ou 'sair' para encerrar:");
-                    try {
-                        System.out.print("> ");
-                        System.out.flush();
-                        String line = in.readLine().toLowerCase();
-                        if (line.startsWith("sair"))
-                            break;
+            while (clienteLogado) {
+                System.out.println("Digite 'alterar', 'remover', 'consultar', 'somarsaldos', 'transferir' ou 'sair':");
+                System.out.print("> ");
+                String line = in.readLine().toLowerCase();
 
-                        if (line.startsWith("cadastrar")) {
-                            System.out.println("Digite o nome do cliente:");
-                            nomeLogin = in.readLine().toLowerCase();
-
-                            System.out.println("Digite a senha do cliente:");
-                            senhaLogin = in.readLine().toLowerCase();
-
-                            enviarCadastroCliente(nomeLogin, senhaLogin);
-                        }
-
-                        if (line.startsWith("remover")) {
-                            System.out.println("Digite o nome do cliente:");
-                            String nome = in.readLine();
-
-                            enviarRemocaoCliente(nome);
-                        }
-
-                        if (line.startsWith("alterar")) {
-                            System.out.println("Digite o nome do cliente:");
-                            String nome = in.readLine();
-
-                            System.out.println("Digite a nova senha do cliente:");
-                            String novaSenha = in.readLine();
-
-                            enviarAlteracaoCliente(nome, novaSenha);
-                        }
-
-                        if (line.startsWith("consultar")) {
-                            System.out.println("Digite o nome do cliente:");
-                            String nome = in.readLine();
-
-                            enviarConsultaCliente(nome);
-                        }
-
-                        if (line.startsWith("somarsaldos")) {
-                            enviarConsultaSomaSaldos();
-                        }
-
-                        if (line.startsWith("transferir")) {
-                            System.out.println("Digite o nome da conta de destino:");
-                            String destinatario = in.readLine().toLowerCase();
-
-                            System.out.println("Digite o valor a ser transferido:");
-                            BigDecimal valor = BigDecimal.valueOf(Double.parseDouble(in.readLine()));
-
-                            enviarTransferencia(nomeLogin, destinatario, valor);
-                        }
-
-                    } catch (Exception e) {
-                        e.printStackTrace();
-                    }
+                switch (line) {
+                    case "alterar":
+                        System.out.println("Digite a nova senha:");
+                        String novaSenha = in.readLine();
+                        enviarAlteracaoCliente(nomeLogin, novaSenha);
+                        break;
+                    case "remover":
+                        enviarRemocaoCliente(nomeLogin);
+                        clienteLogado = false;
+                        break;
+                    case "consultar":
+                        enviarConsultaCliente(nomeLogin);
+                        break;
+                    case "somarsaldos":
+                        enviarConsultaSomaSaldos();
+                        break;
+                    case "transferir":
+                        System.out.println("Digite o nome da conta de destino:");
+                        String destinatario = in.readLine().toLowerCase();
+                        BigDecimal valor;
+                        do {
+                            System.out.println("Digite o valor a ser transferido (não pode ser negativo):");
+                            valor = BigDecimal.valueOf(Double.parseDouble(in.readLine()));
+                            if (valor.compareTo(BigDecimal.ZERO) < 0) {
+                                System.out.println("[CLIENTE] O valor não pode ser negativo. Tente novamente.");
+                            }
+                        } while (valor.compareTo(BigDecimal.ZERO) < 0);
+                        enviarTransferencia(nomeLogin, destinatario, valor);
+                        break;
+                    case "sair":
+                        clienteLogado = false;
+                        eventLoop();
+                        return;
+                    default:
+                        System.out.println("[CLIENTE] Comando inválido.");
                 }
             }
         } catch (Exception e) {
