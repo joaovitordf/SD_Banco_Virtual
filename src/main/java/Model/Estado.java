@@ -7,15 +7,19 @@ public class Estado implements java.io.Serializable {
     private String clientesJson;
 
     public Estado() {
-        this.clientesJson = lerClientesDoArquivo(obterCaminhoArquivo());
+        this.clientesJson = lerClientesDoArquivo(retornaDiretorio("clientes.json"));
     }
 
     public Estado(String clientesJson) {
         this.clientesJson = clientesJson != null ? clientesJson : "[]";
     }
 
-    private static String obterCaminhoArquivo() {
-        return new File("clientes.json").getAbsolutePath(); // Evita dependência de estrutura de diretórios fixa
+    public static String retornaDiretorio(String document) {
+        // Obtém o diretório atual onde o programa está rodando
+        String dirPath = new File("").getAbsolutePath();
+
+        return dirPath + File.separator + "src" + File.separator + "main" + File.separator + "java" + File.separator
+                + document;
     }
 
     private String lerClientesDoArquivo(String caminho) {
