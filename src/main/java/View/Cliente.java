@@ -26,7 +26,7 @@ public class Cliente implements Receiver {
 
     private void start() throws Exception {
         // Conectar ao gateway via RMI
-        gateway = (BancoGatewayInterface) Naming.lookup("rmi://192.168.1.102/BancoGateway");
+        gateway = (BancoGatewayInterface) Naming.lookup("rmi://26.180.18.250/BancoGateway");
         System.out.println("[CLIENTE] Conectado ao gateway via RMI.");
         eventLoop();
     }
