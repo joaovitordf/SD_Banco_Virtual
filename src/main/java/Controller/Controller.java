@@ -22,9 +22,6 @@ import java.net.NetworkInterface;
 public class Controller implements Receiver, RequestHandler, BancoGatewayInterface {
     private JChannel channel;
     private MessageDispatcher despachante;
-    private HashMap<Integer, Conta> contas = new HashMap<>();
-    final List<String> state = new LinkedList<String>();
-    private int idConta = 1;
     private Map<String, Conta> clientes = new HashMap<>(); // Mapa para armazenar clientes
     private String caminhoJson = retornaDiretorio("clientes.json");
     private boolean isCoordenador = false;
@@ -117,7 +114,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         }
         Conta conta = new Conta(nome, Conta.criptografarSenha(senha));
         clientes.put(nome, conta);
-        salvarCadastroEmArquivo(nome, senha);
+        Conta.salvarCadastroEmArquivo(nome, senha);
 
         if (isCoordenador) { // O coordenador propaga, mas não processa a própria propagação
             System.out.println("[SERVIDOR] Propagando novo cliente: " + nome);
@@ -129,7 +126,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
     @Override
     public String consultarSaldo(String nome) throws RemoteException {
-        return consultarSaldoClientePorNome(nome);
+        return Conta.consultarSaldoClientePorNome(nome);
     }
 
     @Override
@@ -177,22 +174,9 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         return sucesso;
     }
 
-
-
-    private int extrairIdConta(String resposta) {
-        try {
-            // Acha o número no final da string usando regex
-            String numero = resposta.replaceAll("[^0-9]", "");
-            return Integer.parseInt(numero);
-        } catch (NumberFormatException e) {
-            System.out.println("[ERRO] Não foi possível extrair o ID da conta: " + resposta);
-            return -1; // Retorna -1 se houver erro
-        }
-    }
-
     public void receive(Message msg) {
         try {
-            Object object = msg.getObject(); // Objeto recebido (Conta)
+            Object object = msg.getObject();
 
             if (object instanceof Conta) {
                 // Desserializando o objeto Conta enviado pelo cliente
@@ -202,7 +186,7 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                 // Armazenando a conta no mapa de clientes
                 clientes.put(conta.getNome(), conta); // Associando a conta pelo numero da conta ou outro identificador
 
-                salvarCadastroEmArquivo(conta.getNome(), conta.getSenha());
+                Conta.salvarCadastroEmArquivo(conta.getNome(), conta.getSenha());
             } else if (object instanceof Estado estadoRecebido) {
                 System.out.println("[SERVIDOR] Recebido estado atualizado do coordenador.");
                 System.out.println("JSON Recebido: " + estadoRecebido.getClientesJson());
@@ -234,19 +218,19 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                             break;
 
                         case "CONSULTAR_ID_ORIGEM":
-                            String respostaIdOrigem = consultarIdClienteOrigem(nomeCliente);
+                            String respostaIdOrigem = Conta.consultarIdClienteOrigem(nomeCliente);
                             Message respostaOrigem = new ObjectMessage(msg.getSrc(), respostaIdOrigem);
                             channel.send(respostaOrigem);
                             break;
 
                         case "CONSULTAR_ID_DESTINO":
-                            String respostaIdDestino = consultarIdClienteDestino(nomeCliente);
+                            String respostaIdDestino = Conta.consultarIdClienteDestino(nomeCliente);
                             Message respostaDestino = new ObjectMessage(msg.getSrc(), respostaIdDestino);
                             channel.send(respostaDestino);
                             break;
 
                         case "CONSULTAR_SALDO":
-                            String respostaSaldo = consultarSaldoClientePorNome(nomeCliente);
+                            String respostaSaldo = Conta.consultarSaldoClientePorNome(nomeCliente);
                             Message respostaConsulta = new ObjectMessage(msg.getSrc(), respostaSaldo);
                             channel.send(respostaConsulta);
                             break;
@@ -390,295 +374,12 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         }
     }
 
-    private void salvarEstado() {
-        try (ObjectOutputStream oos = new ObjectOutputStream(new FileOutputStream("estado_banco.dat"))) {
-            oos.writeObject(contas);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void carregarEstado() {
-        try (ObjectInputStream ois = new ObjectInputStream(new FileInputStream("estado_banco.dat"))) {
-            contas = (HashMap<Integer, Conta>) ois.readObject();
-        } catch (IOException | ClassNotFoundException e) {
-            System.out.println("[SERVIDOR] Nenhum estado anterior encontrado.");
-        }
-    }
 
     @Override
     public Object handle(Message msg) throws Exception {
         Object object = msg.getObject();
 
         return "Mensagem inválida.";
-    }
-
-    private void atualizarSaldoNoArquivo(Conta conta) {
-        File arquivo = new File(caminhoJson);
-
-        if (!arquivo.exists() || arquivo.length() == 0) {
-            System.out.println("[SERVIDOR] Arquivo JSON vazio ou não encontrado.");
-            return;
-        }
-
-        try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-            StringBuilder sb = new StringBuilder();
-            String linha;
-            while ((linha = reader.readLine()) != null) {
-                sb.append(linha);
-            }
-
-            // Converte o conteúdo do arquivo em um JSONArray
-            String content = sb.toString().trim();
-            if (content.startsWith("[") && content.endsWith("]")) {
-                JSONArray clientesArray = new JSONArray(content);
-
-                // Localiza a conta e atualiza o saldo
-                for (int i = 0; i < clientesArray.length(); i++) {
-                    JSONObject cliente = clientesArray.getJSONObject(i);
-                    if (cliente.getInt("id") == conta.getId()) {
-                        cliente.put("saldo", conta.getSaldo());
-                        break;
-                    }
-                }
-
-                // Escreve o array atualizado de volta no arquivo
-                try (FileWriter file = new FileWriter(arquivo)) {
-                    file.write(clientesArray.toString(4));
-                    file.flush();
-                }
-
-                System.out.println("[SERVIDOR] Saldo atualizado no arquivo JSON.");
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    private void salvarCadastroEmArquivo(String nome, String senha) {
-        try {
-            // Verifica se o nome ja existe no json
-            if (clienteExistente(nome)) {
-                System.out.println("[SERVIDOR] Cliente com o nome " + nome + " já cadastrado.");
-                return; // Não permite cadastrar um novo cliente com o mesmo nome
-            }
-
-            // Caminho do arquivo JSON
-            File arquivo = new File(caminhoJson);
-
-            JSONArray clientesArray = new JSONArray();
-            int maiorId = 0;
-
-            if (arquivo.exists() && arquivo.length() > 0) { // Verifica se o arquivo existe e não esta vazio
-                // Leitura do conteudo atual do arquivo
-                try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-                    StringBuilder sb = new StringBuilder();
-                    String linha;
-                    while ((linha = reader.readLine()) != null) {
-                        sb.append(linha);
-                    }
-
-                    // Tenta converter o conteudo do arquivo em um array JSON
-                    String content = sb.toString().trim();
-                    if (content.startsWith("[") && content.endsWith("]")) {
-                        // Se o conteudo for um array valido, converte
-                        clientesArray = new JSONArray(content);
-                        // Determina o maior id no JSON
-                        for (int i = 0; i < clientesArray.length(); i++) {
-                            JSONObject cliente = clientesArray.getJSONObject(i);
-                            if (cliente.has("id")) {
-                                maiorId = Math.max(maiorId, cliente.getInt("id"));
-                            }
-                        }
-                    } else {
-                        // Se não for um array valido, cria um novo array vazio
-                        clientesArray = new JSONArray();
-                    }
-                }
-            }
-
-            // Incrementa o ID para o próximo cliente
-            idConta = maiorId + 1;
-
-            // Cria um objeto JSON com os dados do cliente
-            JSONObject json = new JSONObject();
-            json.put("id", idConta);
-            json.put("nome", nome);
-            json.put("senha", senha);
-            json.put("saldo", 1000);
-
-            // Adiciona o novo cliente ao array
-            clientesArray.put(json);
-
-            // Escreve o array JSON de volta no arquivo
-            try (FileWriter file = new FileWriter(arquivo)) {
-                file.write(clientesArray.toString(4)); // '4' adiciona identação para melhorar a leitura
-                file.flush();
-            }
-
-            System.out.println("[SERVIDOR] Cadastro de cliente armazenado no arquivo.");
-        } catch (Exception e) {
-            e.printStackTrace();
-        }
-    }
-
-    // Verifica se o cliente ja existe pelo nome
-    private boolean clienteExistente(String nome) {
-        File arquivo = new File(caminhoJson);
-
-        if (arquivo.exists() && arquivo.length() > 0) {
-            try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-                StringBuilder sb = new StringBuilder();
-                String linha;
-                while ((linha = reader.readLine()) != null) {
-                    sb.append(linha);
-                }
-
-                // Tenta converter o conteudo do arquivo em um array JSON
-                String content = sb.toString().trim();
-                if (content.startsWith("[") && content.endsWith("]")) {
-                    JSONArray clientesArray = new JSONArray(content);
-                    for (int i = 0; i < clientesArray.length(); i++) {
-                        JSONObject cliente = clientesArray.getJSONObject(i);
-                        if (cliente.getString("nome").equals(nome)) {
-                            return true; // Cliente ja existe
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-        return false; // Cliente não encontrado
-    }
-
-    private BigDecimal consultarSaldoClientePorId(int idConta) {
-        File arquivo = new File(caminhoJson);
-
-        if (arquivo.exists() && arquivo.length() > 0) {
-            try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-                StringBuilder sb = new StringBuilder();
-                String linha;
-                while ((linha = reader.readLine()) != null) {
-                    sb.append(linha);
-                }
-
-                // Converte o conteúdo do arquivo em um array JSON
-                String content = sb.toString().trim();
-                if (content.startsWith("[") && content.endsWith("]")) {
-                    JSONArray clientesArray = new JSONArray(content);
-
-                    for (int i = 0; i < clientesArray.length(); i++) {
-                        JSONObject cliente = clientesArray.getJSONObject(i);
-                        if (cliente.getInt("id") == idConta) {
-                            // Retorna o saldo como BigDecimal
-                            return new BigDecimal(cliente.getDouble("saldo"));
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-        // Retorna BigDecimal.ZERO caso o cliente não seja encontrado
-        return BigDecimal.ZERO;
-    }
-
-    private String consultarSaldoClientePorNome(String nome) {
-        File arquivo = new File(caminhoJson);
-
-        if (arquivo.exists() && arquivo.length() > 0) {
-            try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-                StringBuilder sb = new StringBuilder();
-                String linha;
-                while ((linha = reader.readLine()) != null) {
-                    sb.append(linha);
-                }
-
-                // Converte o conteúdo do arquivo em um array JSON
-                String content = sb.toString().trim();
-                if (content.startsWith("[") && content.endsWith("]")) {
-                    JSONArray clientesArray = new JSONArray(content);
-
-                    for (int i = 0; i < clientesArray.length(); i++) {
-                        JSONObject cliente = clientesArray.getJSONObject(i);
-                        if (cliente.getString("nome").equalsIgnoreCase(nome)) {
-                            // Retorna apenas o saldo do cliente
-                            return String.valueOf(cliente.getDouble("saldo")); // Supondo que saldo é um campo numérico
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-        return "[SERVIDOR] Cliente não encontrado.";
-    }
-
-    private String consultarIdClienteOrigem(String nome) {
-        File arquivo = new File(caminhoJson);
-
-        if (arquivo.exists() && arquivo.length() > 0) {
-            try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-                StringBuilder sb = new StringBuilder();
-                String linha;
-                while ((linha = reader.readLine()) != null) {
-                    sb.append(linha);
-                }
-
-                // Converte o conteúdo do arquivo em um array JSON
-                String content = sb.toString().trim();
-                if (content.startsWith("[") && content.endsWith("]")) {
-                    JSONArray clientesArray = new JSONArray(content);
-
-                    for (int i = 0; i < clientesArray.length(); i++) {
-                        JSONObject cliente = clientesArray.getJSONObject(i);
-                        if (cliente.getString("nome").equalsIgnoreCase(nome)) {
-                            // Se o cliente for encontrado, retorne o ID da conta no formato esperado
-                            int idConta = cliente.getInt("id"); // Supondo que o ID está no campo "id"
-                            return "[SERVIDOR] Conta encontrada: origem=" + idConta; // Retorna a mensagem com o ID da
-                                                                                     // conta
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-        return "[SERVIDOR] Cliente não encontrado."; // Caso o cliente não seja encontrado
-    }
-
-    private String consultarIdClienteDestino(String nome) {
-        File arquivo = new File(caminhoJson);
-
-        if (arquivo.exists() && arquivo.length() > 0) {
-            try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-                StringBuilder sb = new StringBuilder();
-                String linha;
-                while ((linha = reader.readLine()) != null) {
-                    sb.append(linha);
-                }
-
-                // Converte o conteúdo do arquivo em um array JSON
-                String content = sb.toString().trim();
-                if (content.startsWith("[") && content.endsWith("]")) {
-                    JSONArray clientesArray = new JSONArray(content);
-
-                    for (int i = 0; i < clientesArray.length(); i++) {
-                        JSONObject cliente = clientesArray.getJSONObject(i);
-                        if (cliente.getString("nome").equalsIgnoreCase(nome)) {
-                            // Se o cliente for encontrado, retorne o ID da conta no formato esperado
-                            int idConta = cliente.getInt("id"); // Supondo que o ID está no campo "id"
-                            return "[SERVIDOR] Conta encontrada: destino=" + idConta; // Retorna a mensagem com o ID da
-                                                                                      // conta
-                        }
-                    }
-                }
-            } catch (Exception e) {
-                e.printStackTrace();
-            }
-        }
-        return "[SERVIDOR] Cliente não encontrado."; // Caso o cliente não seja encontrado
     }
 
     private String somarSaldosClientes() {
@@ -708,111 +409,13 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
                     }
                 }
 
-                return String.valueOf(somaSaldos); // Retorna apenas o número como string
+                return String.valueOf(somaSaldos);
             } else {
-                return "0"; // Em caso de erro, retorna 0
+                return "0";
             }
         } catch (Exception e) {
             e.printStackTrace();
-            return "0"; // Evita erro ao tentar converter
-        }
-    }
-
-    private String removerClienteDoArquivo(String nome) {
-        File arquivo = new File(caminhoJson);
-
-        if (!arquivo.exists() || arquivo.length() == 0) {
-            return "[SERVIDOR] Arquivo JSON vazio ou não encontrado.";
-        }
-
-        try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-            StringBuilder sb = new StringBuilder();
-            String linha;
-            while ((linha = reader.readLine()) != null) {
-                sb.append(linha);
-            }
-
-            // Converte o conteudo do arquivo em um JSONArray
-            String content = sb.toString().trim();
-            if (content.startsWith("[") && content.endsWith("]")) {
-                JSONArray clientesArray = new JSONArray(content);
-
-                // Percorre o array e remove o cliente com o nome correspondente
-                boolean clienteRemovido = false;
-                for (int i = 0; i < clientesArray.length(); i++) {
-                    JSONObject cliente = clientesArray.getJSONObject(i);
-                    if (cliente.getString("nome").equalsIgnoreCase(nome)) {
-                        clientesArray.remove(i); // Remove o cliente
-                        clienteRemovido = true;
-                        break;
-                    }
-                }
-
-                if (clienteRemovido) {
-                    // Salva o array atualizado de volta no arquivo
-                    try (FileWriter file = new FileWriter(arquivo)) {
-                        file.write(clientesArray.toString(4)); // '4' para identação
-                        file.flush();
-                    }
-                    return "[SERVIDOR] Cliente " + nome + " removido com sucesso.";
-                } else {
-                    return "[SERVIDOR] Cliente " + nome + " não encontrado.";
-                }
-            } else {
-                return "[SERVIDOR] Formato de arquivo JSON inválido.";
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-            return "[SERVIDOR] Erro ao processar a remoção do cliente.";
-        }
-    }
-
-    private String alterarSenhaCliente(String nome, String novaSenha) {
-        File arquivo = new File(caminhoJson);
-
-        if (!arquivo.exists() || arquivo.length() == 0) {
-            return "[SERVIDOR] Arquivo JSON vazio ou não encontrado.";
-        }
-
-        try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
-            StringBuilder sb = new StringBuilder();
-            String linha;
-            while ((linha = reader.readLine()) != null) {
-                sb.append(linha);
-            }
-
-            // Converte o conteudo do arquivo em um JSONArray
-            String content = sb.toString().trim();
-            if (content.startsWith("[") && content.endsWith("]")) {
-                JSONArray clientesArray = new JSONArray(content);
-
-                // Percorre o array para localizar o cliente e alterar a senha
-                boolean clienteAlterado = false;
-                for (int i = 0; i < clientesArray.length(); i++) {
-                    JSONObject cliente = clientesArray.getJSONObject(i);
-                    if (cliente.getString("nome").equalsIgnoreCase(nome)) {
-                        cliente.put("senha", novaSenha); // Atualiza a senha
-                        clienteAlterado = true;
-                        break;
-                    }
-                }
-
-                if (clienteAlterado) {
-                    // Salva o array atualizado de volta no arquivo
-                    try (FileWriter file = new FileWriter(arquivo)) {
-                        file.write(clientesArray.toString(4));
-                        file.flush();
-                    }
-                    return "[SERVIDOR] Senha do cliente " + nome + " alterada com sucesso.";
-                } else {
-                    return "[SERVIDOR] Cliente " + nome + " não encontrado.";
-                }
-            } else {
-                return "[SERVIDOR] Formato de arquivo JSON inválido.";
-            }
-        } catch (Exception e) {
-            e.printStackTrace();
-            return "[SERVIDOR] Erro ao processar a alteração da senha.";
+            return "0";
         }
     }
 

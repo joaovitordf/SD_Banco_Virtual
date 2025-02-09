@@ -31,9 +31,9 @@ public class Estado implements java.io.Serializable {
         for (Map.Entry<String, Conta> entry : clientes.entrySet()) {
             JSONObject jsonObject = new JSONObject();
             jsonObject.put("nome", entry.getKey());
-            jsonObject.put("senha", entry.getValue().getSenha()); // Supondo que a classe Conta tenha um método getSenha()
-            jsonObject.put("id", entry.getValue().getId()); // Supondo que Conta tenha um ID
-            jsonObject.put("saldo", entry.getValue().getSaldo()); // Supondo que Conta tenha um saldo
+            jsonObject.put("senha", entry.getValue().getSenha());
+            jsonObject.put("id", entry.getValue().getId());
+            jsonObject.put("saldo", entry.getValue().getSaldo());
 
             jsonArray.put(jsonObject);
         }

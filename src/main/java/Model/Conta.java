@@ -6,6 +6,9 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.Base64;
 import java.util.Map;
+import java.io.*;
+import org.json.JSONArray;
+import org.json.JSONObject;
 
 public class Conta implements Serializable {
     private static int contadorId = 1; // Contador de ID global para incremento automático
@@ -14,6 +17,7 @@ public class Conta implements Serializable {
     private BigDecimal saldo;
     private String nome;
     private String senha;
+    private static final String caminhoJson = retornaDiretorio("clientes.json");
 
     public Conta(int id, BigDecimal saldo) {
         this.id = id;
@@ -31,6 +35,112 @@ public class Conta implements Serializable {
         this.id = id;
         this.nome = nome;
         this.saldo = valor;
+    }
+
+    public static String retornaDiretorio(String document) {
+        // Obtém o diretório atual onde o programa está rodando
+        String dirPath = new File("").getAbsolutePath();
+
+        return dirPath + File.separator + "src" + File.separator + "main" + File.separator + "java" + File.separator
+                + document;
+    }
+
+    public static void salvarCadastroEmArquivo(String nome, String senha) {
+        try {
+            if (clienteExistente(nome)) {
+                System.out.println("[SERVIDOR] Cliente já cadastrado.");
+                return;
+            }
+
+            File arquivo = new File(caminhoJson);
+            JSONArray clientesArray = new JSONArray();
+            int maiorId = 0;
+
+            if (arquivo.exists() && arquivo.length() > 0) {
+                try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
+                    String content = reader.lines().reduce("", String::concat).trim();
+                    if (content.startsWith("[") && content.endsWith("]")) {
+                        clientesArray = new JSONArray(content);
+                        for (int i = 0; i < clientesArray.length(); i++) {
+                            JSONObject cliente = clientesArray.getJSONObject(i);
+                            if (cliente.has("id")) {
+                                maiorId = Math.max(maiorId, cliente.getInt("id"));
+                            }
+                        }
+                    }
+                }
+            }
+
+            int novoId = maiorId + 1;
+            JSONObject json = new JSONObject();
+            json.put("id", novoId);
+            json.put("nome", nome);
+            json.put("senha", senha);
+            json.put("saldo", 1000);
+            clientesArray.put(json);
+
+            try (FileWriter file = new FileWriter(arquivo)) {
+                file.write(clientesArray.toString(4));
+            }
+
+            System.out.println("[SERVIDOR] Cliente cadastrado.");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+
+    private static boolean clienteExistente(String nome) {
+        File arquivo = new File(caminhoJson);
+        if (arquivo.exists() && arquivo.length() > 0) {
+            try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
+                String content = reader.lines().reduce("", String::concat).trim();
+                if (content.startsWith("[") && content.endsWith("]")) {
+                    JSONArray clientesArray = new JSONArray(content);
+                    for (int i = 0; i < clientesArray.length(); i++) {
+                        JSONObject cliente = clientesArray.getJSONObject(i);
+                        if (cliente.getString("nome").equals(nome)) {
+                            return true;
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+        return false;
+    }
+
+    public static String consultarSaldoClientePorNome(String nome) {
+        return consultarCampoCliente(nome, "saldo");
+    }
+
+    public static String consultarIdClienteOrigem(String nome) {
+        return consultarCampoCliente(nome, "id");
+    }
+
+    public static String consultarIdClienteDestino(String nome) {
+        return consultarCampoCliente(nome, "id");
+    }
+
+    private static String consultarCampoCliente(String nome, String campo) {
+        File arquivo = new File(caminhoJson);
+        if (arquivo.exists() && arquivo.length() > 0) {
+            try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
+                String content = reader.lines().reduce("", String::concat).trim();
+                if (content.startsWith("[") && content.endsWith("]")) {
+                    JSONArray clientesArray = new JSONArray(content);
+                    for (int i = 0; i < clientesArray.length(); i++) {
+                        JSONObject cliente = clientesArray.getJSONObject(i);
+                        if (cliente.getString("nome").equalsIgnoreCase(nome)) {
+                            return String.valueOf(cliente.get(campo));
+                        }
+                    }
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+        }
+        return "[SERVIDOR] Cliente não encontrado.";
     }
 
     public static String criptografarSenha(String senha) {
