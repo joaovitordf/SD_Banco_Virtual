@@ -1,60 +1,42 @@
 package Model;
 
 import java.io.*;
-import java.nio.file.Files;
-import java.nio.file.Paths;
-import java.util.Map;
-import java.util.stream.Collectors;
-
-import org.json.JSONArray;
-import org.json.JSONObject;
-
-import Controller.Controller;
 
 public class Estado implements java.io.Serializable {
-    private String clientesJson;  // Armazena como String JSON
-    private int versao;
+    private static final long serialVersionUID = 1L;
+    private String clientesJson;
 
-    public Estado(Controller cluster) {
-        try {
-            this.clientesJson = gerarJsonClientes(cluster.getClientes());  // Converte o mapa de clientes para JSON
-            this.versao = consultarVersao();
-        } catch (Exception e) {
-            this.versao = 1;
-            this.clientesJson = "[]"; // JSON vazio
-        }
+    public Estado() {
+        this.clientesJson = lerClientesDoArquivo(obterCaminhoArquivo());
     }
 
-    private String gerarJsonClientes(Map<String, Conta> clientes) {
-        JSONArray jsonArray = new JSONArray();
-
-        for (Map.Entry<String, Conta> entry : clientes.entrySet()) {
-            JSONObject jsonObject = new JSONObject();
-            jsonObject.put("nome", entry.getKey());
-            jsonObject.put("senha", entry.getValue().getSenha());
-            jsonObject.put("id", entry.getValue().getId());
-            jsonObject.put("saldo", entry.getValue().getSaldo());
-
-            jsonArray.put(jsonObject);
-        }
-
-        return jsonArray.toString(4); // Formatação bonita
+    public Estado(String clientesJson) {
+        this.clientesJson = clientesJson != null ? clientesJson : "[]";
     }
 
-    public static int consultarVersao() {
-        int versao;
-        try {
-            versao = Integer.parseInt(new String(Files.readAllBytes(Paths.get("versao.txt"))));
-        } catch (Exception e) {
-            versao = 1;
-        }
-        return versao;
+    private static String obterCaminhoArquivo() {
+        return new File("clientes.json").getAbsolutePath(); // Evita dependência de estrutura de diretórios fixa
     }
 
-    public static void atualizarVersao() throws Exception {
-        int versao = consultarVersao();
-        versao++;
-        Files.write(Paths.get("versao.txt"), String.valueOf(versao).getBytes());
+    private String lerClientesDoArquivo(String caminho) {
+        File arquivo = new File(caminho);
+        if (!arquivo.exists()) {
+            System.out.println("[ESTADO] Arquivo " + caminho + " não encontrado. Retornando lista vazia.");
+            return "[]";
+        }
+
+        try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
+            StringBuilder sb = new StringBuilder();
+            String linha;
+            while ((linha = reader.readLine()) != null) {
+                sb.append(linha);
+            }
+            return sb.toString();
+        } catch (IOException e) {
+            System.err.println("[ESTADO] Erro ao ler o arquivo " + caminho + ": " + e.getMessage());
+            e.printStackTrace();
+            return "[]";
+        }
     }
 
     public String getClientesJson() {
@@ -63,9 +45,5 @@ public class Estado implements java.io.Serializable {
 
     public void setClientesJson(String clientesJson) {
         this.clientesJson = clientesJson;
-    }
-
-    public int getVersao() {
-        return versao;
     }
 }

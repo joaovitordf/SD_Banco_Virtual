@@ -263,17 +263,38 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
 
     @Override
     public void getState(OutputStream output) throws Exception {
+        Estado estado;
+
         synchronized (clientes) {
-            Estado estado = new Estado(this);
-            System.out.println("[SERVIDOR] Enviando estado: " + estado.getClientesJson());
-            Util.objectToStream(estado, new DataOutputStream(output));
+            estado = new Estado(); // Carrega o estado atualizado do arquivo
         }
-        System.out.println("[SERVIDOR] Estado enviado para um novo nó do cluster.");
+
+        System.out.println("[SERVIDOR] Enviando estado: " + estado.getClientesJson());
+
+        try {
+            Util.objectToStream(estado, new DataOutputStream(output));
+            System.out.println("[SERVIDOR] Estado enviado com sucesso para um novo nó do cluster.");
+        } catch (IOException e) {
+            System.err.println("[ERRO] Falha ao enviar o estado: " + e.getMessage());
+            throw e;
+        }
     }
 
     @Override
     public void setState(InputStream input) throws Exception {
-        Estado estadoRecebido = (Estado) Util.objectFromStream(new DataInputStream(input));
+        Estado estadoRecebido;
+
+        try {
+            estadoRecebido = (Estado) Util.objectFromStream(new DataInputStream(input));
+
+            if (estadoRecebido == null || estadoRecebido.getClientesJson() == null) {
+                throw new IllegalArgumentException("Estado recebido é inválido.");
+            }
+        } catch (Exception e) {
+            System.err.println("[ERRO] Falha ao desserializar o estado recebido: " + e.getMessage());
+            throw e;
+        }
+
         System.out.println("[SERVIDOR] Estado recebido do cluster:");
         System.out.println(estadoRecebido.getClientesJson());
 
@@ -283,16 +304,18 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
             try (FileWriter writer = new FileWriter(arquivo)) {
                 writer.write(estadoRecebido.getClientesJson());
                 writer.flush();
+                System.out.println("[SERVIDOR] Estado atualizado e salvo em clientes.json.");
+            } catch (IOException e) {
+                System.err.println("[ERRO] Falha ao salvar estado no arquivo: " + e.getMessage());
+                throw e;
             }
-
-            System.out.println("[SERVIDOR] Estado atualizado e salvo em clientes.json.");
         }
     }
 
     private void propagarAtualizacao() {
         try {
             System.out.println("[SERVIDOR] Propagando atualização do estado completo.");
-            Estado estado = new Estado(this);
+            Estado estado = new Estado();
             Message msg = new ObjectMessage(null, estado); // Envia o objeto Estado para todos os nós
             channel.send(msg);
         } catch (Exception e) {
