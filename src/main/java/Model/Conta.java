@@ -167,22 +167,65 @@ public class Conta implements Serializable {
         clientes.remove(nome);
     }
 
-    public static boolean realizarTransferencia(Map<String, Conta> clientes, String remetente, String destinatario, BigDecimal valor) {
-        if (clientes.containsKey(remetente) && clientes.containsKey(destinatario)) {
-            Conta contaOrigem = clientes.get(remetente);
-            Conta contaDestino = clientes.get(destinatario);
-
-            if (contaOrigem.getSaldo().compareTo(valor) >= 0) {
-                contaOrigem.setSaldo(contaOrigem.getSaldo().subtract(valor));
-                contaDestino.setSaldo(contaDestino.getSaldo().add(valor));
-                return true;
-            } else {
-                System.out.println("[ERRO] Saldo insuficiente para a transferência.");
-            }
-        } else {
-            System.out.println("[ERRO] Uma das contas informadas não existe.");
+    public static boolean realizarTransferencia(String remetente, String destinatario, BigDecimal valor) {
+        File arquivo = new File(caminhoJson);
+        if (!arquivo.exists()) {
+            System.out.println("[ERRO] Arquivo de clientes não encontrado.");
+            return false;
         }
-        return false;
+
+        try {
+            // Ler o conteúdo do JSON
+            JSONArray clientesArray;
+            try (BufferedReader reader = new BufferedReader(new FileReader(arquivo))) {
+                String content = reader.lines().reduce("", String::concat).trim();
+                clientesArray = new JSONArray(content);
+            }
+
+            JSONObject remetenteJson = null, destinatarioJson = null;
+
+            // Encontrar as contas no JSON
+            for (int i = 0; i < clientesArray.length(); i++) {
+                JSONObject cliente = clientesArray.getJSONObject(i);
+                if (cliente.getString("nome").equals(remetente)) {
+                    remetenteJson = cliente;
+                }
+                if (cliente.getString("nome").equals(destinatario)) {
+                    destinatarioJson = cliente;
+                }
+            }
+
+            // Verificar se as contas existem
+            if (remetenteJson == null || destinatarioJson == null) {
+                System.out.println("[ERRO] Uma das contas informadas não existe.");
+                return false;
+            }
+
+            BigDecimal saldoRemetente = remetenteJson.getBigDecimal("saldo");
+            BigDecimal saldoDestinatario = destinatarioJson.getBigDecimal("saldo");
+
+            // Verificar saldo suficiente
+            if (saldoRemetente.compareTo(valor) < 0) {
+                System.out.println("[ERRO] Saldo insuficiente para a transferência.");
+                return false;
+            }
+
+            // Realizar a transferência
+            remetenteJson.put("saldo", saldoRemetente.subtract(valor));
+            destinatarioJson.put("saldo", saldoDestinatario.add(valor));
+
+            // Escrever as alterações de volta no arquivo
+            try (FileWriter writer = new FileWriter(arquivo)) {
+                writer.write(clientesArray.toString(4)); // Formatar JSON com indentação
+            }
+
+            System.out.println("[SERVIDOR] Transferência concluída com sucesso.");
+            return true;
+
+        } catch (Exception e) {
+            e.printStackTrace();
+            return false;
+        }
     }
 
     public int getId() {

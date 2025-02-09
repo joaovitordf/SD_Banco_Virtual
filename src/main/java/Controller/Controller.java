@@ -161,11 +161,10 @@ public class Controller implements Receiver, RequestHandler, BancoGatewayInterfa
         return sucesso;
     }
 
-
     @Override
     public boolean realizarTransferencia(String remetente, String destinatario, BigDecimal valor)
             throws RemoteException {
-        boolean sucesso = Conta.realizarTransferencia(clientes, remetente, destinatario, valor);
+        boolean sucesso = Conta.realizarTransferencia(remetente, destinatario, valor);
 
         if (sucesso && isCoordenador) {
             System.out.println("[SERVIDOR] Propagando transferência de " + valor + " de " + remetente + " para " + destinatario);
